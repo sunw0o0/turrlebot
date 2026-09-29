@@ -1,5 +1,12 @@
 /*
- * app.c - drive both wheels at a fixed speed
+ * app.c - drive both wheels, controlled by the board switches
+ *
+ * Switches (on = pin low):
+ *   S1 on         -> run (off -> stop)
+ *   S2 on         -> stop, overrides everything
+ *   S3 on         -> speed 2 (faster)
+ *   S4 on         -> speed 1, overrides S3
+ *   neither S3/S4 -> speed 1
  *
  * Motors: MX-64(2.0), Protocol 2.0. At startup the bus is scanned with a
  * broadcast ping at several baud rates, so the motors' baud rate and IDs
@@ -11,11 +18,13 @@
 #include "main.h"
 #include "dxl.h"
 #include "mx64.h"
+#include "sw.h"
 
 #define LEFT_DIR  (+1)
 #define RIGHT_DIR (-1)
 
-#define FIXED_SPEED 50           /* x 0.229 rpm = ~11.5 rpm */
+#define SPEED_1 50               /* x 0.229 rpm = ~11.5 rpm */
+#define SPEED_2 100              /* ~22.9 rpm */
 
 #define RETRY_PERIOD_MS  500
 #define UPDATE_PERIOD_MS 50
@@ -31,6 +40,8 @@ volatile uint8_t g_dxl_hw_err[2]; /* Hardware Error Status seen (addr 70) */
 volatile int g_dxl_reboots;       /* reboots done to clear hardware errors */
 volatile int g_dxl_ready;
 volatile uint32_t g_dxl_rx_bytes; /* > 0: at least our echo comes back */
+volatile uint8_t g_sw_on;         /* switches on: bit0 = S1 ... bit3 = S4 */
+volatile int32_t g_speed;         /* speed currently commanded */
 
 static uint8_t ids[2];
 static int count;
@@ -84,8 +95,19 @@ static int motors_setup(void)
   return 1;
 }
 
+/* Speed chosen by the switches, 0 = stop */
+static int32_t speed_from_switches(uint8_t on)
+{
+  if (!(on & SW1) || (on & SW2))
+    return 0;
+  if ((on & SW3) && !(on & SW4))
+    return SPEED_2;
+  return SPEED_1;
+}
+
 void app_init(void)
 {
+  sw_init();
   dxl_init(USART3);
   HAL_Delay(300);                /* let the motors boot */
   g_dxl_ready = motors_setup();
@@ -107,8 +129,9 @@ void app_loop(void)
 
   if (now - last_tick >= UPDATE_PERIOD_MS) {
     last_tick = now;
-    const int32_t speeds[2] = { LEFT_DIR * FIXED_SPEED,
-                                RIGHT_DIR * FIXED_SPEED };
+    g_sw_on = sw_on();
+    g_speed = speed_from_switches(g_sw_on);
+    const int32_t speeds[2] = { LEFT_DIR * g_speed, RIGHT_DIR * g_speed };
     mx64_set_speeds(ids, speeds, (uint8_t)count);
   }
 }

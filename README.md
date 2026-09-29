@@ -10,7 +10,8 @@ CubeMX 재생성 시 `Core/`의 USER CODE 밖은 덮어써지므로 직접 작�
 |---|---|
 | `App/dxl.c/h` | Dynamixel Protocol 2.0 (ping / broadcast ping / read / write / sync write, CRC, byte stuffing, TX echo 무시) |
 | `App/mx64.c/h` | MX-64(2.0) Control Table, 속도 모드(Operating Mode 1), Goal Velocity |
-| `App/app.c/h` | 두 바퀴를 고정 속도로 구동 |
+| `App/app.c/h` | 스위치에 따라 두 바퀴 구동 |
+| `App/sw.c/h` | 보드 슬라이드 스위치 S1~S4 (PB12~PB15) 읽기 |
 
 `main.c`:
 
@@ -55,4 +56,15 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 | `g_dxl_rx_bytes` | 받은 바이트 수 (0이면 에코도 안 돌아옴 = MCU~RS-485 칩 배선 문제) |
 
 - 12V가 늦게 들어와도 500ms마다 재시도한다
-- 속도는 `app.c`의 `FIXED_SPEED` (1 = 0.229 rpm), 방향은 `LEFT_DIR` / `RIGHT_DIR`
+- 속도는 `app.c`의 `SPEED_1` / `SPEED_2` (1 = 0.229 rpm), 방향은 `LEFT_DIR` / `RIGHT_DIR`
+
+## 스위치 (켜짐 = 핀 LOW)
+
+| 스위치 | 동작 |
+|---|---|
+| S1 (PB12) | 켜져 있는 동안 구동, 꺼지면 정지 |
+| S2 (PB13) | 켜져 있으면 정지 (다른 스위치보다 우선) |
+| S3 (PB14) | 켜져 있으면 2단 속도 (`SPEED_2`) |
+| S4 (PB15) | 켜져 있으면 1단 속도 유지 (`SPEED_1`, S3보다 우선) |
+
+S3/S4 둘 다 꺼져 있으면 1단 속도. 디버거에서 `g_sw_on`(bit0=S1 ... bit3=S4), `g_speed`로 확인.
