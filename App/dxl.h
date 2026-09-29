@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 #include "main.h"
-
+#include "stm32f4xx_hal.h"
 #define DXL_BROADCAST_ID 0xFE
 
 /* Return codes (>= 0 is the status packet's error byte) */
