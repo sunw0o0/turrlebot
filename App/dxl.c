@@ -29,6 +29,8 @@ static uint8_t rx_buf[RX_BUF_SIZE];
 static uint16_t rx_head;
 static uint16_t rx_tail;
 
+volatile uint32_t dxl_rx_count;
+
 static uint8_t tx_pkt[PKT_MAX];
 static uint8_t tx_len;
 
@@ -40,6 +42,7 @@ static void rx_poll(void)
   if (LL_USART_IsActiveFlag_RXNE(dxl_usart)) {
     rx_buf[rx_head & (RX_BUF_SIZE - 1)] = LL_USART_ReceiveData8(dxl_usart);
     rx_head++;
+    dxl_rx_count++;
   }
 }
 
@@ -159,6 +162,17 @@ void dxl_init(USART_TypeDef *usart)
   rx_tail = 0;
   if (!LL_USART_IsEnabled(usart))
     LL_USART_Enable(usart);
+  rx_flush();
+}
+
+void dxl_set_baud(uint32_t baud)
+{
+  while (!LL_USART_IsActiveFlag_TC(dxl_usart))
+    ;
+  LL_USART_Disable(dxl_usart);
+  LL_USART_SetBaudRate(dxl_usart, HAL_RCC_GetPCLK1Freq(),
+                       LL_USART_OVERSAMPLING_16, baud);
+  LL_USART_Enable(dxl_usart);
   rx_flush();
 }
 

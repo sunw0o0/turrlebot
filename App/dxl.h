@@ -23,6 +23,10 @@
 #define DXL_ERR_ARG     -3
 
 void dxl_init(USART_TypeDef *usart);
+void dxl_set_baud(uint32_t baud);
+
+/* Total bytes received since dxl_init (includes the TX echo) */
+extern volatile uint32_t dxl_rx_count;
 
 int dxl_ping(uint8_t id);
 int dxl_read(uint8_t id, uint8_t addr, uint8_t len, uint8_t *out);
