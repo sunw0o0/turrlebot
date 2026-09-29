@@ -27,6 +27,8 @@ volatile uint32_t g_dxl_baud;     /* baud rate the motors answered at */
 volatile int g_dxl_count;         /* motors found (0..2) */
 volatile uint8_t g_dxl_ids[2];    /* [0] = left, [1] = right */
 volatile int g_dxl_err;           /* last setup error (<0 comm, >0 motor) */
+volatile uint8_t g_dxl_hw_err[2]; /* Hardware Error Status seen (addr 70) */
+volatile int g_dxl_reboots;       /* reboots done to clear hardware errors */
 volatile int g_dxl_ready;
 volatile uint32_t g_dxl_rx_bytes; /* > 0: at least our echo comes back */
 
@@ -60,9 +62,20 @@ static int motors_setup(void)
   }
   g_dxl_count = count;
   for (int i = 0; i < count; i++) {
+    uint8_t hw = 0;
+    int ret;
+
     g_dxl_ids[i] = ids[i];
-    int ret = mx64_set_wheel_mode(ids[i]);
-    if (ret != 0) {
+    /* A latched hardware error keeps torque off until the motor reboots */
+    ret = dxl_read(ids[i], MX64_ADDR_HARDWARE_ERROR, 1, &hw);
+    if (ret >= 0 && hw) {
+      g_dxl_hw_err[i] = hw;
+      dxl_reboot(ids[i]);
+      g_dxl_reboots++;
+      HAL_Delay(1000);
+    }
+    ret = mx64_set_wheel_mode(ids[i]);
+    if (MX64_FAILED(ret) || (ret & DXL_ALERT)) {
       g_dxl_err = ret;
       return 0;
     }

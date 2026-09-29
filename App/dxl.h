@@ -18,6 +18,7 @@
 #define DXL_BROADCAST_ID 0xFE
 
 /* Return codes (>= 0 is the status packet's error byte) */
+#define DXL_ALERT        0x80  /* error byte bit: hardware error latched */
 #define DXL_OK           0
 #define DXL_ERR_TX      -1
 #define DXL_ERR_TIMEOUT -2
@@ -35,6 +36,9 @@ int dxl_ping(uint8_t id);
 /* Broadcast ping: every motor on the bus answers. Stores up to `max`
  * IDs and returns how many answered. */
 int dxl_scan(uint8_t *ids, int max);
+
+/* Reboot clears a latched hardware error (torque stays off until then). */
+int dxl_reboot(uint8_t id);
 
 int dxl_read(uint8_t id, uint16_t addr, uint16_t len, uint8_t *out);
 int dxl_write(uint8_t id, uint16_t addr, const uint8_t *data, uint16_t len);

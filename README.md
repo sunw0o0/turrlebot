@@ -49,7 +49,9 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 | `g_dxl_ready` | 1이면 설정 완료, 바퀴 구동 중 |
 | `g_dxl_baud` | 모터가 응답한 통신 속도 (0이면 못 찾음) |
 | `g_dxl_count`, `g_dxl_ids` | 찾은 모터 수와 ID ([0] 왼쪽, [1] 오른쪽) |
-| `g_dxl_err` | 설정 중 마지막 에러 (-2 응답 없음, 양수는 모터 에러 코드) |
+| `g_dxl_err` | 설정 중 마지막 에러 (-2 응답 없음, 양수는 모터 에러 코드, 128(0x80)은 하드웨어 에러 걸림) |
+| `g_dxl_hw_err` | 모터에 걸려 있던 Hardware Error Status (0x01 전압, 0x04 과열, 0x08 엔코더, 0x10 전기 충격, 0x20 과부하). 있으면 Reboot로 지우고 다시 설정한다 |
+| `g_dxl_reboots` | 하드웨어 에러를 지우려고 재부팅한 횟수 (계속 늘어나면 원인이 남아 있음) |
 | `g_dxl_rx_bytes` | 받은 바이트 수 (0이면 에코도 안 돌아옴 = MCU~RS-485 칩 배선 문제) |
 
 - 12V가 늦게 들어와도 500ms마다 재시도한다

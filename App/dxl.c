@@ -17,6 +17,7 @@
 #define INST_PING       0x01
 #define INST_READ       0x02
 #define INST_WRITE      0x03
+#define INST_REBOOT     0x08
 #define INST_SYNC_WRITE 0x83
 #define INST_STATUS     0x55
 
@@ -240,6 +241,14 @@ int dxl_scan(uint8_t *ids, int max)
     count++;
   }
   return count < max ? count : max;
+}
+
+int dxl_reboot(uint8_t id)
+{
+  int ret = send_packet(id, INST_REBOOT, NULL, 0);
+  if (ret != DXL_OK)
+    return ret;
+  return recv_status(id, NULL, 0);
 }
 
 int dxl_read(uint8_t id, uint16_t addr, uint16_t len, uint8_t *out)

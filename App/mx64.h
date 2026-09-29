@@ -19,10 +19,22 @@
 #define MX64_ADDR_GOAL_VELOCITY    104  /* 4 bytes, signed */
 #define MX64_ADDR_PRESENT_VELOCITY 128  /* 4 bytes, signed */
 
+/* Hardware Error Status bits */
+#define MX64_HW_INPUT_VOLTAGE 0x01
+#define MX64_HW_OVERHEATING   0x04
+#define MX64_HW_ENCODER       0x08
+#define MX64_HW_SHOCK         0x10
+#define MX64_HW_OVERLOAD      0x20
+
 #define MX64_MODE_VELOCITY 1
 #define MX64_MODE_POSITION 3
 
 /* Goal velocity unit: 0.229 rpm */
+
+/* Result of a motor call: < 0 comm error, otherwise the status error
+ * byte. Only the low 7 bits are real errors; DXL_ALERT just flags a
+ * latched hardware error. */
+#define MX64_FAILED(ret) ((ret) < 0 || ((ret) & 0x7F) != 0)
 
 int mx64_torque(uint8_t id, uint8_t on);
 /* Turns torque off, switches to velocity mode (EEPROM is written only if
