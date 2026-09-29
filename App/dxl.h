@@ -4,6 +4,9 @@
  * MAX13488E switches TX/RX direction automatically, so no DE/RE GPIO is
  * needed. Because RE is tied to GND, our own TX bytes may echo back on RX;
  * the driver discards that echo.
+ *
+ * USART3 is generated with the LL driver (CubeMX). RX is polled while a
+ * transaction is in progress, so no USART interrupt is needed.
  */
 #ifndef DXL_H
 #define DXL_H
@@ -19,7 +22,7 @@
 #define DXL_ERR_TIMEOUT -2
 #define DXL_ERR_ARG     -3
 
-void dxl_init(UART_HandleTypeDef *huart);
+void dxl_init(USART_TypeDef *usart);
 
 int dxl_ping(uint8_t id);
 int dxl_read(uint8_t id, uint8_t addr, uint8_t len, uint8_t *out);

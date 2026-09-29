@@ -5,10 +5,11 @@
  *   LEN = number of params + 2
  *   CHK = ~(ID + LEN + INST + PARAM...)
  *
- * RX runs on a 1-byte interrupt reception feeding a ring buffer, so the
- * USART3 global interrupt must be enabled in CubeMX (NVIC Settings).
+ * RX is polled (LL driver): bytes arriving while we transmit (the echo)
+ * are drained into rx_buf, and recv_status() polls the USART directly.
  */
 #include "dxl.h"
+#include "stm32f4xx_ll_usart.h"
 #include <string.h>
 
 #define INST_PING       0x01
@@ -22,53 +23,66 @@
 #define RX_BUF_SIZE 256        /* power of two */
 #define PKT_MAX     64
 
-static UART_HandleTypeDef *dxl_huart;
+static USART_TypeDef *dxl_usart;
 
-static volatile uint8_t rx_buf[RX_BUF_SIZE];
-static volatile uint16_t rx_head;   /* written by ISR */
-static uint16_t rx_tail;            /* read by main loop */
-static uint8_t rx_byte;
+static uint8_t rx_buf[RX_BUF_SIZE];
+static uint16_t rx_head;
+static uint16_t rx_tail;
 
 static uint8_t tx_pkt[PKT_MAX];
 static uint8_t tx_len;
 
-static void rx_start(void)
+/* Moves a received byte (if any) into rx_buf and clears overrun. */
+static void rx_poll(void)
 {
-  HAL_UART_Receive_IT(dxl_huart, &rx_byte, 1);
-}
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  if (huart != dxl_huart)
-    return;
-  rx_buf[rx_head & (RX_BUF_SIZE - 1)] = rx_byte;
-  rx_head++;
-  rx_start();
-}
-
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
-  if (huart != dxl_huart)
-    return;
-  /* ORE aborts the reception; PE/FE/NE keep it running */
-  if (huart->RxState == HAL_UART_STATE_READY)
-    rx_start();
+  if (LL_USART_IsActiveFlag_ORE(dxl_usart))
+    LL_USART_ClearFlag_ORE(dxl_usart);
+  if (LL_USART_IsActiveFlag_RXNE(dxl_usart)) {
+    rx_buf[rx_head & (RX_BUF_SIZE - 1)] = LL_USART_ReceiveData8(dxl_usart);
+    rx_head++;
+  }
 }
 
 static void rx_flush(void)
 {
+  while (LL_USART_IsActiveFlag_RXNE(dxl_usart))
+    (void)LL_USART_ReceiveData8(dxl_usart);
+  if (LL_USART_IsActiveFlag_ORE(dxl_usart))
+    LL_USART_ClearFlag_ORE(dxl_usart);
   rx_tail = rx_head;
 }
 
 static int rx_get(uint8_t *b, uint32_t deadline)
 {
   while (rx_tail == rx_head) {
-    if ((int32_t)(HAL_GetTick() - deadline) >= 0)
+    rx_poll();
+    if (rx_tail == rx_head && (int32_t)(HAL_GetTick() - deadline) >= 0)
       return 0;
   }
   *b = rx_buf[rx_tail & (RX_BUF_SIZE - 1)];
   rx_tail++;
   return 1;
+}
+
+static int tx_bytes(const uint8_t *data, uint8_t len)
+{
+  uint32_t deadline = HAL_GetTick() + TX_TIMEOUT_MS + 1;
+
+  for (uint8_t i = 0; i < len; i++) {
+    while (!LL_USART_IsActiveFlag_TXE(dxl_usart)) {
+      rx_poll();
+      if ((int32_t)(HAL_GetTick() - deadline) >= 0)
+        return DXL_ERR_TX;
+    }
+    LL_USART_TransmitData8(dxl_usart, data[i]);
+    rx_poll();
+  }
+  while (!LL_USART_IsActiveFlag_TC(dxl_usart)) {
+    rx_poll();
+    if ((int32_t)(HAL_GetTick() - deadline) >= 0)
+      return DXL_ERR_TX;
+  }
+  return DXL_OK;
 }
 
 static uint8_t checksum(const uint8_t *pkt)
@@ -96,9 +110,7 @@ static int send_packet(uint8_t id, uint8_t inst, const uint8_t *params,
   tx_len = nparams + 6;
 
   rx_flush();
-  if (HAL_UART_Transmit(dxl_huart, tx_pkt, tx_len, TX_TIMEOUT_MS) != HAL_OK)
-    return DXL_ERR_TX;
-  return DXL_OK;
+  return tx_bytes(tx_pkt, tx_len);
 }
 
 /* Waits for a status packet from `id`, skipping the echo of our own
@@ -140,12 +152,14 @@ static int recv_status(uint8_t id, uint8_t *params, uint8_t nparams)
   }
 }
 
-void dxl_init(UART_HandleTypeDef *huart)
+void dxl_init(USART_TypeDef *usart)
 {
-  dxl_huart = huart;
+  dxl_usart = usart;
   rx_head = 0;
   rx_tail = 0;
-  rx_start();
+  if (!LL_USART_IsEnabled(usart))
+    LL_USART_Enable(usart);
+  rx_flush();
 }
 
 int dxl_ping(uint8_t id)

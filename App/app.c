@@ -10,8 +10,6 @@
 #include "dxl.h"
 #include "mx64.h"
 
-extern UART_HandleTypeDef huart3;
-
 #define LEFT_ID   1
 #define RIGHT_ID  2
 #define LEFT_DIR  (+1)
@@ -51,7 +49,7 @@ static int motors_setup(void)
 
 void app_init(void)
 {
-  dxl_init(&huart3);
+  dxl_init(USART3);
   HAL_Delay(100);                /* let the motors boot */
   g_dxl_ready = motors_setup();
   last_tick = HAL_GetTick();

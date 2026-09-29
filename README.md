@@ -33,7 +33,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 ## CubeMX 설정
 
 - USART3: Asynchronous, 1 Mbps, 8N1, **TX = PC10**, RX = PC11 (PB10은 LED4)
-- NVIC: **USART3 global interrupt 켜기** (수신이 인터럽트 기반)
+- USART3 드라이버는 LL (Project Manager > Advanced Settings). 송수신은 폴링이라 USART3 인터럽트는 필요 없음
 
 ## 모터 설정 (Dynamixel Wizard, 한 번만)
 
