@@ -1,6 +1,6 @@
 # turrlebot
 
-STM32F446RE + MX-64 x2 (RS-485, MAX13488E) 바퀴 구동.
+STM32F446RE + MX-64(2.0) x2 (RS-485, MAX13488E, Protocol 2.0) 바퀴 구동.
 
 ## 구조
 
@@ -8,8 +8,8 @@ CubeMX 재생성 시 `Core/`의 USER CODE 밖은 덮어써지므로 직접 작�
 
 | 파일 | 내용 |
 |---|---|
-| `App/dxl.c/h` | Dynamixel Protocol 1.0 (ping / read / write / sync write, TX echo 무시) |
-| `App/mx64.c/h` | MX-64 Control Table, 휠 모드, 속도 명령 |
+| `App/dxl.c/h` | Dynamixel Protocol 2.0 (ping / broadcast ping / read / write / sync write, CRC, byte stuffing, TX echo 무시) |
+| `App/mx64.c/h` | MX-64(2.0) Control Table, 속도 모드(Operating Mode 1), Goal Velocity |
 | `App/app.c/h` | 두 바퀴를 고정 속도로 구동 |
 
 `main.c`:
@@ -35,19 +35,22 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 - USART3: Asynchronous, 1 Mbps, 8N1, **TX = PC10**, RX = PC11 (PB10은 LED4)
 - USART3 드라이버는 LL (Project Manager > Advanced Settings). 송수신은 폴링이라 USART3 인터럽트는 필요 없음
 
-## 모터 설정 (Dynamixel Wizard, 한 번만)
+## 모터
 
-두 모터 모두 공장 출하값이 ID 1 / 57600bps라서 **한 개씩만 연결해서** 바꾼다.
+- 펌웨어 MX-64(2.0), Protocol 2.0. 통신 속도와 ID는 코드가 자동으로 찾는다.
+  - 1M, 57600, 115200, 2M, 9600bps 순서로 broadcast ping을 보내 처음 응답한 속도를 쓴다.
+  - 찾은 ID 중 작은 쪽이 왼쪽 바퀴다. 두 모터의 ID는 서로 달라야 한다.
+- 속도 모드(Operating Mode = 1)는 `app_init()`에서 자동으로 설정한다 (EEPROM은 값이 다를 때만 쓴다).
 
-| | ID | Baud Rate (값) | Protocol |
-|---|---|---|---|
-| 왼쪽 | 1 | 1 Mbps (1) | 1.0 |
-| 오른쪽 | 2 | 1 Mbps (1) | 1.0 |
+## 동작 확인 (디버거 Expressions)
 
-휠 모드(CW/CCW Angle Limit = 0)는 `app_init()`에서 자동으로 설정한다.
+| 변수 | 의미 |
+|---|---|
+| `g_dxl_ready` | 1이면 설정 완료, 바퀴 구동 중 |
+| `g_dxl_baud` | 모터가 응답한 통신 속도 (0이면 못 찾음) |
+| `g_dxl_count`, `g_dxl_ids` | 찾은 모터 수와 ID ([0] 왼쪽, [1] 오른쪽) |
+| `g_dxl_err` | 설정 중 마지막 에러 (-2 응답 없음, 양수는 모터 에러 코드) |
+| `g_dxl_rx_bytes` | 받은 바이트 수 (0이면 에코도 안 돌아옴 = MCU~RS-485 칩 배선 문제) |
 
-## 동작 확인
-
-- 디버거 Live Expressions에서 `g_dxl_ping` (0이면 응답 OK, -2면 타임아웃), `g_dxl_ready` 확인
 - 12V가 늦게 들어와도 500ms마다 재시도한다
-- 속도는 `app.c`의 `FIXED_SPEED` (1 = 약 0.114 rpm), 방향은 `LEFT_DIR` / `RIGHT_DIR`
+- 속도는 `app.c`의 `FIXED_SPEED` (1 = 0.229 rpm), 방향은 `LEFT_DIR` / `RIGHT_DIR`
