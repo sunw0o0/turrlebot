@@ -28,5 +28,6 @@ void host_write(const uint8_t *data, uint16_t len);
 /* 디버깅용 */
 extern volatile uint32_t g_host_rx_bytes;      /* 젯슨에서 받은 바이트 수 */
 extern volatile uint32_t g_host_overflow;      /* 버퍼가 넘쳐 버린 바이트 수 */
+extern volatile uint32_t g_host_tx_bytes;      /* 젯슨으로 보낸 바이트 수 */
 
 #endif /* HOST_H */

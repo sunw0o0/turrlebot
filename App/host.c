@@ -19,6 +19,7 @@ static volatile uint16_t rx_tail;
 
 volatile uint32_t g_host_rx_bytes;
 volatile uint32_t g_host_overflow;
+volatile uint32_t g_host_tx_bytes;
 
 void host_init(void)
 {
@@ -71,5 +72,6 @@ void host_write(const uint8_t *data, uint16_t len)
     while (!LL_USART_IsActiveFlag_TXE(HOST_USART)) {
     }
     LL_USART_TransmitData8(HOST_USART, data[i]);
+    g_host_tx_bytes++;
   }
 }
