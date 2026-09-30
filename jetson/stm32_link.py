@@ -35,16 +35,58 @@ def vel_packet(linear_mps, angular_rps):
 
 
 class Stm32Link:
+    """
+    USB 가 순간적으로 끊겨도 (잡음으로 USB 허브가 리셋되는 경우)
+    프로그램이 죽지 않고 다시 연결될 때까지 조용히 재시도한다.
+    """
+
     def __init__(self, port="/dev/ttyUSB0", baud=115200):
+        self.port = port
+        self.baud = baud
         self.ser = serial.Serial(port, baud, timeout=0)
         self.buf = bytearray()
+        self.reconnects = 0          # 다시 연결한 횟수
+        self.connected = True
+
+    def _lost(self):
+        """연결이 끊겼을 때: 포트를 닫고 다음에 다시 연다"""
+        if self.connected:
+            self.connected = False
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+
+    def _ensure_open(self):
+        """끊겨 있으면 다시 열어 본다. 열려 있으면 True"""
+        if self.connected:
+            return True
+        try:
+            self.ser = serial.Serial(self.port, self.baud, timeout=0)
+        except (serial.SerialException, OSError):
+            return False             # 아직 USB 가 안 돌아옴
+        self.buf = bytearray()
+        self.connected = True
+        self.reconnects += 1
+        return True
 
     def send_vel(self, linear_mps, angular_rps):
-        self.ser.write(vel_packet(linear_mps, angular_rps))
+        if not self._ensure_open():
+            return
+        try:
+            self.ser.write(vel_packet(linear_mps, angular_rps))
+        except (serial.SerialException, OSError):
+            self._lost()
 
     def read_status(self):
         """받은 상태 패킷들을 dict 리스트로 돌려준다 (없으면 빈 리스트)"""
-        self.buf += self.ser.read(self.ser.in_waiting or 1)
+        if not self._ensure_open():
+            return []
+        try:
+            self.buf += self.ser.read(self.ser.in_waiting or 1)
+        except (serial.SerialException, OSError):
+            self._lost()
+            return []
         out = []
         while True:
             i = self.buf.find(bytes([HEAD1, HEAD2]))
@@ -76,8 +118,8 @@ class Stm32Link:
                 })
 
     def close(self):
+        self.send_vel(0.0, 0.0)         # 마지막으로 정지 명령
         try:
-            self.send_vel(0.0, 0.0)     # 마지막으로 정지 명령
-        except serial.SerialException:
-            pass                        # USB 가 빠졌으면 보낼 수 없음
-        self.ser.close()
+            self.ser.close()
+        except Exception:
+            pass

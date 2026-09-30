@@ -34,6 +34,7 @@ class Stm32Bridge(Node):
         self.w = 0.0
         self.last_cmd = 0.0
         self.last_state = None
+        self.was_connected = True
 
         self.create_subscription(Twist, "cmd_vel", self.on_cmd, 10)
         self.create_timer(0.05, self.on_timer)      # 20Hz
@@ -49,6 +50,13 @@ class Stm32Bridge(Node):
             self.v = 0.0
             self.w = 0.0
         self.link.send_vel(self.v, self.w)
+
+        if self.link.connected != self.was_connected:
+            self.was_connected = self.link.connected
+            if self.link.connected:
+                self.get_logger().info(f"USB 다시 연결됨 (재연결 {self.link.reconnects}번)")
+            else:
+                self.get_logger().warn("USB 끊김 -> 다시 연결 기다리는 중")
 
         for st in self.link.read_status():
             key = (st["ready"], st["state"], st["sw"], st["hw_err"])
