@@ -2,7 +2,7 @@
  * sw.h - 보드 슬라이드 스위치 S1~S4
  *
  *   S1 = PB12, S2 = PB13, S3 = PB14, S4 = PB15
- *   핀이 LOW(0) 이면 "켜짐" 으로 본다.
+ *   핀이 HIGH(1) 이면 "켜짐" 으로 본다 (sw.c 의 SW_ON_LEVEL).
  *
  * sw_on() 은 켜진 스위치를 비트로 알려준다.
  *   bit0 = S1, bit1 = S2, bit2 = S3, bit3 = S4
