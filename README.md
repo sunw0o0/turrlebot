@@ -14,6 +14,7 @@ CubeMX 재생성 시 `Core/`의 USER CODE 밖은 덮어써지므로 직접 작�
 | `App/sw.c/h` | 보드 슬라이드 스위치 S1~S4 (PB12~PB15) 읽기 |
 | `App/host.c/h` | 젯슨과 시리얼 통신 (USART6, 인터럽트 수신). 지금은 받은 바이트를 그대로 돌려보내는 에코 테스트 |
 | `jetson/echo_test.py` | 젯슨에서 돌리는 에코 테스트 스크립트 |
+| `jetson/find_port.py` | ttyTHS1 / ttyTHS2 중 STM32 와 연결된 포트를 자동으로 찾는 스크립트 |
 
 `main.c`:
 
@@ -86,6 +87,6 @@ S3/S4 둘 다 꺼져 있으면 1단 속도. 디버거에서 `g_sw_on`(bit0=S1 ..
   - `/* USER CODE BEGIN Includes */` 아래: `#include "host.h"`
   - `/* USER CODE BEGIN USART6_IRQn 0 */` 아래: `host_irq();`
 - 젯슨: `python3 jetson/echo_test.py /dev/ttyTHS2` 로 보낸 문자열이 그대로 돌아오면 성공
-- 젯슨 Orin Nano Super 에서 40핀 8/10번은 `/dev/ttyTHS2` (ttyTHS1 아님)
+- 포트가 헷갈리면 젯슨에서 `python3 jetson/find_port.py` 실행 후 STM32 리셋 버튼을 누르면 연결된 포트를 알려준다
 - STM32 가 켜질 때 `STM32 ready` 를 한 번 보낸다. J10 3번-4번을 점퍼로 이으면 에코가 계속 돌아 rx/tx 카운터가 늘어난다 (STM32 쪽 자체 점검)
 - 디버거: `g_host_rx_bytes` (받은 바이트 수), `g_host_tx_bytes` (보낸 바이트 수), `g_host_overflow` (버퍼 넘침)
