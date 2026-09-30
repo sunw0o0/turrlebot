@@ -9,16 +9,25 @@
  *    3. 모터 설정   : 에러 있으면 재부팅 -> 속도 모드 -> 토크 ON
  *
  *  app_loop()  (while(1) 안에서 계속)
+ *    - 젯슨에서 온 패킷 처리 (속도 명령 cmd_vel 저장)
+ *    - 0.1초마다 젯슨에 상태 보고
  *    - 준비 안 됐으면 : 0.5초마다 2~3 다시 시도 (12V 를 늦게 켜도 됨)
- *    - 준비 됐으면     : 0.05초마다 스위치 읽기 -> 속도 정하기 -> 모터에 전송
+ *    - 준비 됐으면     : 0.05초마다 속도 정하기 -> 모터에 전송
  *
- * ============ 스위치 (켜짐 = 핀 LOW) ============
+ * ============ 어떻게 움직일지 (위에서부터 우선) ============
  *
- *   S1 켜짐 -> 달린다 (꺼지면 정지)
- *   S2 켜짐 -> 정지   (다른 스위치보다 우선)
- *   S3 켜짐 -> 2단 속도
- *   S4 켜짐 -> 1단 속도 유지 (S3 보다 우선)
- *   S3, S4 둘 다 꺼짐 -> 1단 속도
+ *   S2 켜짐                          -> 비상 정지
+ *   S1 꺼짐                          -> 정지
+ *   ROS 명령(cmd_vel) 이 0.3초 안에 옴 -> 그 명령대로 주행
+ *   S3 또는 S4 켜짐                  -> 고정 속도 테스트 (S4 = 1단, S3 = 2단)
+ *   그 외 (ROS 명령 끊김)            -> 정지
+ *
+ * ============ cmd_vel -> 바퀴 속도 (차동 구동) ============
+ *
+ *   v = 선속도 (m/s, 앞 +),  w = 각속도 (rad/s, 왼쪽 회전 +)
+ *   왼쪽 바퀴  (rad/s) = (v - w * L/2) / r
+ *   오른쪽 바퀴 (rad/s) = (v + w * L/2) / r
+ *   MX-64 값 = rpm / 0.229,   rpm = rad/s * 60 / (2 * pi)
  */
 #include "app.h"
 #include "main.h"
@@ -26,6 +35,7 @@
 #include "mx64.h"
 #include "sw.h"
 #include "host.h"
+#include "proto.h"
 
 /* ==================== 바꿔 쓰는 설정값 ==================== */
 
@@ -38,7 +48,18 @@
 #define LEFT_DIR  (+1)
 #define RIGHT_DIR (-1)
 
-#define UPDATE_PERIOD_MS 50      /* 속도 명령 보내는 주기 */
+/* ---- 로봇 치수 (임시값! 실제 로봇에 맞게 바꾸기) ---- */
+#define WHEEL_RADIUS_M     0.05f   /* 바퀴 반지름 r (m) */
+#define WHEEL_SEPARATION_M 0.30f   /* 좌우 바퀴 중심 사이 거리 L (m) */
+
+/* ---- 안전 제한 ---- */
+#define MAX_LINEAR_MPS  0.30f      /* 선속도 최대 (m/s) */
+#define MAX_ANGULAR_RPS 1.50f      /* 각속도 최대 (rad/s) */
+#define MAX_GOAL        250        /* MX-64 값 최대 (약 57 rpm) */
+#define CMD_TIMEOUT_MS  300        /* 이 시간 동안 ROS 명령이 없으면 정지 */
+
+#define STATUS_PERIOD_MS 100       /* 젯슨에 상태 보고하는 주기 */
+#define UPDATE_PERIOD_MS 50        /* 속도 명령 보내는 주기 */
 #define RETRY_PERIOD_MS  500     /* 모터를 못 찾았을 때 다시 찾는 주기 */
 
 /* 모터를 찾을 때 시도할 통신 속도 (앞에서부터 차례로) */
@@ -62,7 +83,11 @@ volatile uint16_t g_dxl_volt_min[2];/* 모터에 설정된 전압 하한 */
 volatile uint16_t g_dxl_volt_max[2];/* 모터에 설정된 전압 상한 */
 volatile uint32_t g_dxl_rx_bytes;   /* 받은 바이트 수 (0 = 배선 문제) */
 volatile uint8_t  g_sw_on;          /* 켜진 스위치 (bit0 = S1 ... bit3 = S4) */
-volatile int32_t  g_speed;          /* 지금 보내는 속도 */
+volatile int32_t  g_speed;          /* 스위치 테스트 모드 속도 */
+volatile int16_t  g_cmd_lin_mm;     /* 받은 선속도 (mm/s) */
+volatile int16_t  g_cmd_ang_mrad;   /* 받은 각속도 (mrad/s) */
+volatile int32_t  g_goal[2];        /* 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 */
+volatile uint8_t  g_state;          /* PROTO_STATE_* (proto.h) */
 
 
 /* ==================== 이 파일 안에서만 쓰는 변수 ==================== */
@@ -70,6 +95,9 @@ volatile int32_t  g_speed;          /* 지금 보내는 속도 */
 static uint8_t  ids[2];             /* 찾은 모터 ID ([0] 왼쪽, [1] 오른쪽) */
 static int      count;              /* 찾은 모터 수 */
 static uint32_t last_tick;          /* 마지막으로 일한 시각 (ms) */
+static uint32_t last_status_tick;   /* 마지막으로 상태를 보고한 시각 */
+static uint32_t last_cmd_tick;      /* 마지막으로 ROS 명령을 받은 시각 */
+static int      has_cmd;            /* ROS 명령을 한 번이라도 받았는지 */
 
 
 /*
@@ -222,6 +250,146 @@ static int32_t speed_from_switches(uint8_t on)
 }
 
 
+/* ==================== 젯슨 통신 ==================== */
+
+/* 받은 바이트를 패킷으로 조립하고, 속도 명령이면 저장한다 */
+static void handle_host(void)
+{
+  uint8_t b;
+  proto_packet_t pkt;
+
+  while (host_read(&b)) {
+    if (!proto_feed(b, &pkt)) {
+      continue;                  /* 아직 패킷이 다 안 모임 */
+    }
+    if (pkt.cmd == PROTO_CMD_VEL && pkt.len == 4) {
+      /* 2바이트씩 작은 자리 먼저 -> 부호 있는 16비트 정수 */
+      g_cmd_lin_mm   = (int16_t)(pkt.data[0] | (pkt.data[1] << 8));
+      g_cmd_ang_mrad = (int16_t)(pkt.data[2] | (pkt.data[3] << 8));
+      last_cmd_tick = HAL_GetTick();
+      has_cmd = 1;
+    }
+  }
+}
+
+/* 젯슨에 상태 패킷을 보낸다 */
+static void send_status(void)
+{
+  uint8_t data[7];
+  uint8_t buf[7 + 5];
+
+  data[0] = (uint8_t)g_dxl_ready;
+  data[1] = g_state;
+  data[2] = g_sw_on;
+  data[3] = g_dxl_hw_err[0];
+  data[4] = g_dxl_hw_err[1];
+  data[5] = (uint8_t)(g_dxl_volt[0] & 0xFF);
+  data[6] = (uint8_t)(g_dxl_volt[0] >> 8);
+
+  uint16_t n = proto_build(PROTO_CMD_STATUS, data, 7, buf);
+  host_write(buf, n);
+}
+
+
+/* ==================== cmd_vel -> 바퀴 값 ==================== */
+
+/* value 를 -limit ~ +limit 사이로 자른다 */
+static float clampf(float value, float limit)
+{
+  if (value > limit) {
+    return limit;
+  }
+  if (value < -limit) {
+    return -limit;
+  }
+  return value;
+}
+
+/* 바퀴 각속도 (rad/s) -> MX-64 Goal Velocity 값 (소수) */
+static float wheel_to_goal(float wheel_rad_s)
+{
+  const float TWO_PI = 6.2831853f;
+  float rpm = wheel_rad_s * 60.0f / TWO_PI;
+  return rpm / 0.229f;
+}
+
+/* 소수 -> 정수 (반올림) */
+static int32_t round_to_int(float value)
+{
+  if (value >= 0.0f) {
+    return (int32_t)(value + 0.5f);
+  }
+  return (int32_t)(value - 0.5f);
+}
+
+/* 절댓값 */
+static float absf(float value)
+{
+  if (value < 0.0f) {
+    return -value;
+  }
+  return value;
+}
+
+/* 선속도(mm/s), 각속도(mrad/s) -> 왼쪽/오른쪽 MX-64 값 */
+static void cmd_vel_to_goals(int16_t lin_mm, int16_t ang_mrad,
+                             int32_t *left, int32_t *right)
+{
+  float v = clampf(lin_mm / 1000.0f, MAX_LINEAR_MPS);
+  float w = clampf(ang_mrad / 1000.0f, MAX_ANGULAR_RPS);
+
+  float left_rad_s  = (v - w * WHEEL_SEPARATION_M / 2.0f) / WHEEL_RADIUS_M;
+  float right_rad_s = (v + w * WHEEL_SEPARATION_M / 2.0f) / WHEEL_RADIUS_M;
+
+  float l = wheel_to_goal(left_rad_s);
+  float r = wheel_to_goal(right_rad_s);
+
+  /* 한쪽이라도 MAX_GOAL 을 넘으면 두 바퀴를 같은 비율로 줄인다.
+     (한쪽만 자르면 도는 모양이 바뀌기 때문) */
+  float biggest = absf(l);
+  if (absf(r) > biggest) {
+    biggest = absf(r);
+  }
+  if (biggest > (float)MAX_GOAL) {
+    float scale = (float)MAX_GOAL / biggest;
+    l = l * scale;
+    r = r * scale;
+  }
+
+  *left  = round_to_int(l);
+  *right = round_to_int(r);
+}
+
+/*
+ * 지금 어떻게 움직일지 정한다.
+ * left, right 에 "앞으로 가는 방향 기준" 바퀴 값을 넣고 상태를 돌려준다.
+ * (모터 방향 LEFT_DIR / RIGHT_DIR 은 보내기 직전에 곱한다)
+ */
+static uint8_t decide(uint8_t on, uint32_t now, int32_t *left, int32_t *right)
+{
+  *left = 0;
+  *right = 0;
+
+  if (on & SW2) {
+    return PROTO_STATE_ESTOP;
+  }
+  if (!(on & SW1)) {
+    return PROTO_STATE_STOP_SW;
+  }
+  if (has_cmd && (now - last_cmd_tick) < CMD_TIMEOUT_MS) {
+    cmd_vel_to_goals(g_cmd_lin_mm, g_cmd_ang_mrad, left, right);
+    return PROTO_STATE_ROS;
+  }
+  if (on & (SW3 | SW4)) {
+    g_speed = speed_from_switches(on);
+    *left = g_speed;
+    *right = g_speed;
+    return PROTO_STATE_MANUAL;
+  }
+  return PROTO_STATE_NO_CMD;
+}
+
+
 /* ==================== main.c 에서 부르는 함수 ==================== */
 
 void app_init(void)
@@ -239,11 +407,17 @@ void app_loop(void)
 {
   uint32_t now = HAL_GetTick();
 
-  /* ---- 젯슨 통신 테스트: 받은 바이트를 그대로 돌려보낸다 (에코) ----
-     모터 준비 여부와 상관없이 항상 동작하도록 맨 앞에 둔다. */
-  uint8_t b;
-  while (host_read(&b)) {
-    host_write(&b, 1);
+  /* ---- 젯슨에서 온 명령 처리 (모터 상태와 상관없이 항상) ---- */
+  handle_host();
+
+  /* ---- 0.1초마다 젯슨에 상태 보고 ---- */
+  if (now - last_status_tick >= STATUS_PERIOD_MS) {
+    last_status_tick = now;
+    g_sw_on = sw_on();
+    if (!g_dxl_ready) {
+      g_state = PROTO_STATE_NOT_READY;
+    }
+    send_status();
   }
 
   /* ---- 아직 준비 안 됨: 0.5초마다 다시 시도 ---- */
@@ -255,16 +429,20 @@ void app_loop(void)
     return;
   }
 
-  /* ---- 준비 됨: 0.05초마다 스위치 읽고 속도 보내기 ---- */
+  /* ---- 준비 됨: 0.05초마다 속도 정해서 보내기 ---- */
   if (now - last_tick >= UPDATE_PERIOD_MS) {
     last_tick = now;
 
+    int32_t left;
+    int32_t right;
     g_sw_on = sw_on();
-    g_speed = speed_from_switches(g_sw_on);
+    g_state = decide(g_sw_on, now, &left, &right);
+    g_goal[0] = left;
+    g_goal[1] = right;
 
     int32_t speeds[2];
-    speeds[0] = LEFT_DIR * g_speed;    /* 왼쪽 */
-    speeds[1] = RIGHT_DIR * g_speed;   /* 오른쪽 */
+    speeds[0] = LEFT_DIR * left;       /* 왼쪽 */
+    speeds[1] = RIGHT_DIR * right;     /* 오른쪽 */
     mx64_set_speeds(ids, speeds, (uint8_t)count);
   }
 }

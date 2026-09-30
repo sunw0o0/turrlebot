@@ -10,10 +10,14 @@ CubeMX 재생성 시 `Core/`의 USER CODE 밖은 덮어써지므로 직접 작�
 |---|---|
 | `App/dxl.c/h` | Dynamixel Protocol 2.0 (ping / broadcast ping / read / write / sync write, CRC, byte stuffing, TX echo 무시) |
 | `App/mx64.c/h` | MX-64(2.0) Control Table, 속도 모드(Operating Mode 1), Goal Velocity |
-| `App/app.c/h` | 스위치에 따라 두 바퀴 구동 |
+| `App/app.c/h` | ROS 속도 명령(cmd_vel) / 스위치에 따라 두 바퀴 구동 |
+| `App/proto.c/h` | 젯슨 <-> STM32 패킷 규칙 (속도 명령, 상태 보고) |
 | `App/sw.c/h` | 보드 슬라이드 스위치 S1~S4 (PB12~PB15) 읽기 |
-| `App/host.c/h` | 젯슨과 시리얼 통신 (USART6, 인터럽트 수신). 지금은 받은 바이트를 그대로 돌려보내는 에코 테스트 |
-| `jetson/echo_test.py` | 젯슨에서 돌리는 에코 테스트 스크립트 |
+| `App/host.c/h` | 젯슨과 시리얼 통신 (USART6, 인터럽트 수신) |
+| `jetson/stm32_bridge.py` | ROS 2 노드: `/cmd_vel` -> STM32 |
+| `jetson/teleop_test.py` | ROS 없이 키보드(w/s/a/d)로 속도 명령 테스트 |
+| `jetson/stm32_link.py` | 위 두 스크립트가 쓰는 패킷 코드 |
+| `jetson/echo_test.py` | 에코 테스트 (예전 에코 펌웨어용, 지금 펌웨어에서는 FAIL 이 정상) |
 | `jetson/find_port.py` | ttyTHS1 / ttyTHS2 중 STM32 와 연결된 포트를 자동으로 찾는 스크립트 |
 
 `main.c`:
@@ -62,16 +66,50 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 - 12V가 늦게 들어와도 500ms마다 재시도한다
 - 속도는 `app.c`의 `SPEED_1` / `SPEED_2` (1 = 0.229 rpm), 방향은 `LEFT_DIR` / `RIGHT_DIR`
 
-## 스위치 (켜짐 = 핀 LOW)
+## 스위치 (켜짐 = 핀 LOW) 와 ROS 명령
 
-| 스위치 | 동작 |
+위에서부터 먼저 맞는 것 하나만 적용된다.
+
+| 조건 | 동작 | `g_state` |
+|---|---|---|
+| S2 (PB13) 켜짐 | 비상 정지 | 2 |
+| S1 (PB12) 꺼짐 | 정지 | 0 |
+| ROS 속도 명령이 0.3초 안에 옴 | 명령대로 주행 | 1 |
+| S3 (PB14) 또는 S4 (PB15) 켜짐 | 고정 속도 테스트 (S4 = `SPEED_1`, S3 = `SPEED_2`, S4 우선) | 5 |
+| 그 외 | 정지 (명령 기다림) | 3 |
+
+모터 준비가 안 됐으면 `g_state` = 4. **S1 만 켜고 ROS 명령이 없으면 정지한다** (예전과 다름). 스위치로만 굴리려면 S1 + S3 또는 S1 + S4.
+
+## ROS 속도 명령 (cmd_vel)
+
+- 선속도 v (m/s, 앞 +), 각속도 w (rad/s, 왼쪽 회전 +) -> 두 바퀴 속도 (차동 구동)
+  - 왼쪽 = (v - w·L/2) / r, 오른쪽 = (v + w·L/2) / r  [rad/s] -> rpm -> ÷ 0.229
+- 로봇 치수는 **임시값**: `WHEEL_RADIUS_M` = 0.05 m, `WHEEL_SEPARATION_M` = 0.30 m (`app.c`). 실제로 재서 바꿀 것
+- 안전 제한: v 최대 0.3 m/s, w 최대 1.5 rad/s, 모터 값 최대 250 (약 57 rpm, 넘으면 두 바퀴를 같은 비율로 줄임)
+- 0.3초 동안 명령이 없으면 정지. 젯슨은 멈춰 있을 때도 20Hz 로 계속 보낸다
+- 패킷 규칙은 `App/proto.h` 참고
+
+젯슨에서 (`pip3 install pyserial`, 스크립트 3개는 같은 폴더에):
+
+```bash
+# ROS 없이 키보드 테스트
+python3 teleop_test.py /dev/ttyUSB0
+
+# ROS 2
+source /opt/ros/jazzy/setup.bash
+python3 stm32_bridge.py --ros-args -p port:=/dev/ttyUSB0
+ros2 run teleop_twist_keyboard teleop_twist_keyboard     # 다른 터미널
+```
+
+디버거:
+
+| 변수 | 의미 |
 |---|---|
-| S1 (PB12) | 켜져 있는 동안 구동, 꺼지면 정지 |
-| S2 (PB13) | 켜져 있으면 정지 (다른 스위치보다 우선) |
-| S3 (PB14) | 켜져 있으면 2단 속도 (`SPEED_2`) |
-| S4 (PB15) | 켜져 있으면 1단 속도 유지 (`SPEED_1`, S3보다 우선) |
-
-S3/S4 둘 다 꺼져 있으면 1단 속도. 디버거에서 `g_sw_on`(bit0=S1 ... bit3=S4), `g_speed`로 확인.
+| `g_state` | 위 표의 상태 |
+| `g_cmd_lin_mm`, `g_cmd_ang_mrad` | 마지막으로 받은 선속도 (mm/s), 각속도 (mrad/s) |
+| `g_goal` | 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 (방향 부호 곱하기 전) |
+| `g_proto_ok`, `g_proto_bad` | 제대로 받은 패킷 수, 깨진 패킷 수 |
+| `g_sw_on`, `g_speed` | 켜진 스위치 (bit0=S1 ... bit3=S4), 스위치 테스트 속도 |
 
 ## 젯슨 통신 (USART6)
 
@@ -86,8 +124,7 @@ S3/S4 둘 다 꺼져 있으면 1단 속도. 디버거에서 `g_sw_on`(bit0=S1 ..
 - 코드 생성 후 `Core/Src/stm32f4xx_it.c` 에 두 줄 추가 (USER CODE 구역이라 재생성해도 유지됨)
   - `/* USER CODE BEGIN Includes */` 아래: `#include "host.h"`
   - `/* USER CODE BEGIN USART6_IRQn 0 */` 아래: `host_irq();`
-- 젯슨: `python3 jetson/echo_test.py /dev/ttyUSB0` 로 보낸 문자열이 그대로 돌아오면 성공
 - 젯슨 40핀 UART(ttyTHS1/2)는 젯슨 혼자 루프백도 안 돼서 **USB-TTL 변환기(3.3V)** 로 연결했다: STM TX(J10 3) → 변환기 RX, STM RX(J10 4) ← 변환기 TX, GND 공통, 젯슨에서는 `/dev/ttyUSB0`
 - 포트가 헷갈리면 젯슨에서 `python3 jetson/find_port.py` 실행 후 STM32 리셋 버튼을 누르면 연결된 포트를 알려준다
-- STM32 가 켜질 때 `STM32 ready` 를 한 번 보낸다. J10 3번-4번을 점퍼로 이으면 에코가 계속 돌아 rx/tx 카운터가 늘어난다 (STM32 쪽 자체 점검)
+- STM32 가 켜질 때 `STM32 ready` 를 한 번 보내고, 그 뒤로 0.1초마다 상태 패킷을 보낸다
 - 디버거: `g_host_rx_bytes` (받은 바이트 수), `g_host_tx_bytes` (보낸 바이트 수), `g_host_overflow` (버퍼 넘침)
