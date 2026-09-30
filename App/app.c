@@ -25,6 +25,7 @@
 #include "dxl.h"
 #include "mx64.h"
 #include "sw.h"
+#include "host.h"
 
 /* ==================== 바꿔 쓰는 설정값 ==================== */
 
@@ -201,6 +202,7 @@ static int32_t speed_from_switches(uint8_t on)
 void app_init(void)
 {
   sw_init();
+  host_init();                   /* 젯슨 통신 (USART6) */
   dxl_init(USART3);
   HAL_Delay(300);                /* 모터가 전원 켜고 부팅할 시간 */
 
@@ -211,6 +213,13 @@ void app_init(void)
 void app_loop(void)
 {
   uint32_t now = HAL_GetTick();
+
+  /* ---- 젯슨 통신 테스트: 받은 바이트를 그대로 돌려보낸다 (에코) ----
+     모터 준비 여부와 상관없이 항상 동작하도록 맨 앞에 둔다. */
+  uint8_t b;
+  while (host_read(&b)) {
+    host_write(&b, 1);
+  }
 
   /* ---- 아직 준비 안 됨: 0.5초마다 다시 시도 ---- */
   if (!g_dxl_ready) {

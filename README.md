@@ -12,6 +12,8 @@ CubeMX 재생성 시 `Core/`의 USER CODE 밖은 덮어써지므로 직접 작�
 | `App/mx64.c/h` | MX-64(2.0) Control Table, 속도 모드(Operating Mode 1), Goal Velocity |
 | `App/app.c/h` | 스위치에 따라 두 바퀴 구동 |
 | `App/sw.c/h` | 보드 슬라이드 스위치 S1~S4 (PB12~PB15) 읽기 |
+| `App/host.c/h` | 젯슨과 시리얼 통신 (USART6, 인터럽트 수신). 지금은 받은 바이트를 그대로 돌려보내는 에코 테스트 |
+| `jetson/echo_test.py` | 젯슨에서 돌리는 에코 테스트 스크립트 |
 
 `main.c`:
 
@@ -69,3 +71,19 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 | S4 (PB15) | 켜져 있으면 1단 속도 유지 (`SPEED_1`, S3보다 우선) |
 
 S3/S4 둘 다 꺼져 있으면 1단 속도. 디버거에서 `g_sw_on`(bit0=S1 ... bit3=S4), `g_speed`로 확인.
+
+## 젯슨 통신 (USART6)
+
+| STM32 (J10) | 젯슨 Orin Nano 40핀 |
+|---|---|
+| 1 GND | 6 GND |
+| 3 PC6 USART6_TX | 10 RXD |
+| 4 PC7 USART6_RX | 8 TXD |
+| 2 +5V | 연결하지 않음 |
+
+- CubeMX: USART6 Asynchronous 115200 8N1, 드라이버 LL, NVIC USART6 global interrupt 켜기
+- 코드 생성 후 `Core/Src/stm32f4xx_it.c` 에 두 줄 추가 (USER CODE 구역이라 재생성해도 유지됨)
+  - `/* USER CODE BEGIN Includes */` 아래: `#include "host.h"`
+  - `/* USER CODE BEGIN USART6_IRQn 0 */` 아래: `host_irq();`
+- 젯슨: `python3 jetson/echo_test.py /dev/ttyTHS1` 로 보낸 문자열이 그대로 돌아오면 성공
+- 디버거: `g_host_rx_bytes` (받은 바이트 수), `g_host_overflow` (버퍼 넘침)
