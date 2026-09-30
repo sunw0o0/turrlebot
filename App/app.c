@@ -55,6 +55,10 @@ volatile uint8_t  g_dxl_ids[2];     /* [0] 왼쪽, [1] 오른쪽 모터 ID */
 volatile int      g_dxl_err;        /* 설정 실패 이유 (-2 = 응답 없음) */
 volatile uint8_t  g_dxl_hw_err[2];  /* 모터에 걸려 있던 하드웨어 에러 */
 volatile int      g_dxl_reboots;    /* 에러 때문에 재부팅한 횟수 */
+/* 전압 (0.1V 단위, 예: 120 = 12.0V). 에러 1(입력 전압 이상) 확인용 */
+volatile uint16_t g_dxl_volt[2];    /* 모터가 측정한 지금 전압 */
+volatile uint16_t g_dxl_volt_min[2];/* 모터에 설정된 전압 하한 */
+volatile uint16_t g_dxl_volt_max[2];/* 모터에 설정된 전압 상한 */
 volatile uint32_t g_dxl_rx_bytes;   /* 받은 바이트 수 (0 = 배선 문제) */
 volatile uint8_t  g_sw_on;          /* 켜진 스위치 (bit0 = S1 ... bit3 = S4) */
 volatile int32_t  g_speed;          /* 지금 보내는 속도 */
@@ -100,7 +104,19 @@ static int setup_one_motor(int index)
 {
   uint8_t id = ids[index];
   uint8_t hw_error = 0;
+  uint8_t buf[2];
   int ret;
+
+  /* 0) 진단용: 전압과 전압 허용 범위를 읽어 둔다 (2바이트, 작은 자리 먼저) */
+  if (dxl_read(id, MX64_ADDR_PRESENT_VOLTAGE, 2, buf) >= 0) {
+    g_dxl_volt[index] = buf[0] | (buf[1] << 8);
+  }
+  if (dxl_read(id, MX64_ADDR_MIN_VOLTAGE, 2, buf) >= 0) {
+    g_dxl_volt_min[index] = buf[0] | (buf[1] << 8);
+  }
+  if (dxl_read(id, MX64_ADDR_MAX_VOLTAGE, 2, buf) >= 0) {
+    g_dxl_volt_max[index] = buf[0] | (buf[1] << 8);
+  }
 
   /* 1) 하드웨어 에러 확인.
         과부하 등으로 에러가 걸린 모터는 재부팅하기 전까지 토크가 안 켜진다. */

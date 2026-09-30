@@ -16,6 +16,8 @@
 #define MX64_ADDR_ID             7
 #define MX64_ADDR_BAUD_RATE      8
 #define MX64_ADDR_OPERATING_MODE 11   /* 1 = 속도 모드, 3 = 위치 모드 */
+#define MX64_ADDR_MAX_VOLTAGE    32   /* 2바이트, 전압 상한 (0.1V 단위) */
+#define MX64_ADDR_MIN_VOLTAGE    34   /* 2바이트, 전압 하한 (0.1V 단위) */
 #define MX64_ADDR_VELOCITY_LIMIT 44   /* 4바이트 */
 
 /* ---- RAM 영역: 전원을 끄면 초기화됨 ---- */
@@ -24,6 +26,7 @@
 #define MX64_ADDR_HARDWARE_ERROR   70   /* 하드웨어 에러 상태 (읽기 전용) */
 #define MX64_ADDR_GOAL_VELOCITY    104  /* 목표 속도, 4바이트, 음수 = 반대 방향 */
 #define MX64_ADDR_PRESENT_VELOCITY 128  /* 현재 속도, 4바이트 */
+#define MX64_ADDR_PRESENT_VOLTAGE  144  /* 지금 들어오는 전압, 2바이트 (0.1V 단위) */
 
 /* Operating Mode 값 */
 #define MX64_MODE_VELOCITY 1
