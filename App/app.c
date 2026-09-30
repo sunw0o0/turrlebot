@@ -98,6 +98,19 @@ static int find_motors(void)
 }
 
 /*
+ * 모터 토크가 실제로 켜져 있으면 1.
+ * (과부하/과열 등으로 모터가 스스로 토크를 끈 상태인지 확인)
+ */
+static int torque_is_on(uint8_t id)
+{
+  uint8_t on = 0;
+  if (dxl_read(id, MX64_ADDR_TORQUE_ENABLE, 1, &on) < 0) {
+    return 0;
+  }
+  return on == 1;
+}
+
+/*
  * 모터 하나 설정
  * 성공하면 0, 실패하면 에러 값을 돌려준다.
  */
@@ -119,23 +132,35 @@ static int setup_one_motor(int index)
     g_dxl_volt_max[index] = buf[0] | (buf[1] << 8);
   }
 
-  /* 1) 하드웨어 에러 확인.
-        과부하 등으로 에러가 걸린 모터는 재부팅하기 전까지 토크가 안 켜진다. */
-  ret = dxl_read(id, MX64_ADDR_HARDWARE_ERROR, 1, &hw_error);
-  if (ret >= 0 && hw_error != 0) {
-    g_dxl_hw_err[index] = hw_error;
-    dxl_reboot(id);
-    g_dxl_reboots++;
-    HAL_Delay(1000);             /* 재부팅 끝날 때까지 기다림 */
-  }
-
-  /* 2) 바퀴용 설정 (속도 모드 + 토크 ON) */
+  /* 1) 바퀴용 설정 (속도 모드 + 토크 ON) */
   ret = mx64_set_wheel_mode(id);
   if (mx64_failed(ret)) {
     return ret;
   }
+
+  /* 2) 에러 표시(Alert)가 있으면 어떤 에러인지 기록한다.
+        전압 에러(0x01)처럼 토크를 끄지 않는 에러도 있으므로,
+        실패 여부는 "토크가 실제로 켜졌는지"로 판단한다. */
   if (ret & DXL_ALERT) {
-    return ret;                  /* 재부팅 후에도 하드웨어 에러가 남아 있음 */
+    if (dxl_read(id, MX64_ADDR_HARDWARE_ERROR, 1, &hw_error) >= 0) {
+      g_dxl_hw_err[index] = hw_error;
+    }
+    if (torque_is_on(id)) {
+      return 0;                  /* 경고는 있지만 움직일 수 있음 */
+    }
+
+    /* 3) 토크가 안 켜졌을 때만 재부팅해서 에러를 지우고 한 번 더 시도 */
+    dxl_reboot(id);
+    g_dxl_reboots++;
+    HAL_Delay(1000);             /* 재부팅 끝날 때까지 기다림 */
+
+    ret = mx64_set_wheel_mode(id);
+    if (mx64_failed(ret)) {
+      return ret;
+    }
+    if (!torque_is_on(id)) {
+      return DXL_ALERT;          /* 재부팅 후에도 토크가 안 켜짐 */
+    }
   }
   return 0;
 }

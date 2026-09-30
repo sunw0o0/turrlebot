@@ -54,7 +54,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 | `g_dxl_baud` | 모터가 응답한 통신 속도 (0이면 못 찾음) |
 | `g_dxl_count`, `g_dxl_ids` | 찾은 모터 수와 ID ([0] 왼쪽, [1] 오른쪽) |
 | `g_dxl_err` | 설정 중 마지막 에러 (-2 응답 없음, 양수는 모터 에러 코드, 128(0x80)은 하드웨어 에러 걸림) |
-| `g_dxl_hw_err` | 모터에 걸려 있던 Hardware Error Status (0x01 전압, 0x04 과열, 0x08 엔코더, 0x10 전기 충격, 0x20 과부하). 있으면 Reboot로 지우고 다시 설정한다 |
+| `g_dxl_hw_err` | 모터에 걸려 있던 Hardware Error Status (0x01 전압, 0x04 과열, 0x08 엔코더, 0x10 전기 충격, 0x20 과부하). 토크가 켜지면(전압 에러 등) 경고로만 기록하고 그대로 구동, 토크가 안 켜질 때만 Reboot 후 한 번 더 시도 |
 | `g_dxl_reboots` | 하드웨어 에러를 지우려고 재부팅한 횟수 (계속 늘어나면 원인이 남아 있음) |
 | `g_dxl_rx_bytes` | 받은 바이트 수. **모터를 못 찾았을 때만** 기록되고, 찾으면 0으로 남는다. 못 찾았는데 0이면 에코도 안 돌아옴 = MCU~RS-485 칩 배선 문제, 0보다 크면 모터 쪽(A/B 배선, 12V, 통신 속도) 문제 |
 | `g_dxl_volt`, `g_dxl_volt_min`, `g_dxl_volt_max` | 모터가 측정한 전압과 허용 범위 (0.1V 단위, 120 = 12.0V). 전압 에러(0x01) 확인용 |
