@@ -5,15 +5,18 @@
 STM32 는 받은 바이트를 그대로 돌려보낸다.
 보낸 문자열이 그대로 돌아오면 배선 / 포트 / 통신 속도가 맞는 것이다.
 
-사용법:  python3 echo_test.py            (기본 /dev/ttyTHS2, Orin Nano 40핀 8/10번)
-         python3 echo_test.py /dev/ttyTHS1
+사용법:  python3 echo_test.py                (기본 /dev/ttyUSB0, USB-TTL 변환기)
+         python3 echo_test.py /dev/ttyTHS1   (젯슨 40핀 UART)
 """
 import sys
 import time
 import serial
 
-port = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyTHS2"
+port = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyUSB0"
 ser = serial.Serial(port, 115200, timeout=0.5)
+
+# 포트를 열 때 생기는 잡음(\x00 등)과 STM32 가 켜질 때 보낸 인사말을 버린다
+time.sleep(0.2)
 ser.reset_input_buffer()
 print(f"{port} 열림. Ctrl+C 로 종료")
 
@@ -23,8 +26,9 @@ try:
     n = 0
     while True:
         msg = f"hello {n}\n".encode()
+        ser.reset_input_buffer()        # 이전에 남은 바이트는 버리고 새로 비교
         ser.write(msg)
-        back = ser.read(len(msg))
+        back = ser.read_until(b"\n")    # 줄바꿈까지 받기
         if back == msg:
             ok += 1
             print(f"OK   {back!r}")

@@ -86,7 +86,8 @@ S3/S4 둘 다 꺼져 있으면 1단 속도. 디버거에서 `g_sw_on`(bit0=S1 ..
 - 코드 생성 후 `Core/Src/stm32f4xx_it.c` 에 두 줄 추가 (USER CODE 구역이라 재생성해도 유지됨)
   - `/* USER CODE BEGIN Includes */` 아래: `#include "host.h"`
   - `/* USER CODE BEGIN USART6_IRQn 0 */` 아래: `host_irq();`
-- 젯슨: `python3 jetson/echo_test.py /dev/ttyTHS2` 로 보낸 문자열이 그대로 돌아오면 성공
+- 젯슨: `python3 jetson/echo_test.py /dev/ttyUSB0` 로 보낸 문자열이 그대로 돌아오면 성공
+- 젯슨 40핀 UART(ttyTHS1/2)는 젯슨 혼자 루프백도 안 돼서 **USB-TTL 변환기(3.3V)** 로 연결했다: STM TX(J10 3) → 변환기 RX, STM RX(J10 4) ← 변환기 TX, GND 공통, 젯슨에서는 `/dev/ttyUSB0`
 - 포트가 헷갈리면 젯슨에서 `python3 jetson/find_port.py` 실행 후 STM32 리셋 버튼을 누르면 연결된 포트를 알려준다
 - STM32 가 켜질 때 `STM32 ready` 를 한 번 보낸다. J10 3번-4번을 점퍼로 이으면 에코가 계속 돌아 rx/tx 카운터가 늘어난다 (STM32 쪽 자체 점검)
 - 디버거: `g_host_rx_bytes` (받은 바이트 수), `g_host_tx_bytes` (보낸 바이트 수), `g_host_overflow` (버퍼 넘침)
