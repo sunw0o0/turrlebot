@@ -76,5 +76,8 @@ class Stm32Link:
                 })
 
     def close(self):
-        self.send_vel(0.0, 0.0)
+        try:
+            self.send_vel(0.0, 0.0)     # 마지막으로 정지 명령
+        except serial.SerialException:
+            pass                        # USB 가 빠졌으면 보낼 수 없음
         self.ser.close()

@@ -18,6 +18,8 @@ import termios
 import time
 import tty
 
+import serial
+
 from stm32_link import Stm32Link
 
 port = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyUSB0"
@@ -51,7 +53,11 @@ try:
             w = max(-1.5, min(1.5, round(w, 1)))
 
         # 멈춰 있어도 계속 보낸다 (0.3초 끊기면 STM32 가 정지)
-        link.send_vel(v, w)
+        try:
+            link.send_vel(v, w)
+        except serial.SerialException:
+            print("USB-TTL 연결이 끊겼습니다 (ls /dev/ttyUSB* 로 확인)")
+            break
 
         for st in link.read_status():
             status = st
