@@ -6,10 +6,10 @@
 
 /*
  * "켜짐" 으로 볼 핀 상태.
- * 예전에 동작하던 코드와 같이 HIGH(1) = 켜짐.
- * 스위치가 거꾸로 읽히면 GPIO_PIN_RESET 으로 바꾸면 된다.
+ * 실제 보드에서 확인: 아무것도 안 켜면 HIGH, 스위치를 켜면 LOW(0).
+ * 스위치가 거꾸로 읽히면 GPIO_PIN_SET 으로 바꾸면 된다.
  */
-#define SW_ON_LEVEL GPIO_PIN_SET
+#define SW_ON_LEVEL GPIO_PIN_RESET
 
 /*
  * PB12~PB15 를 입력으로 설정한다.

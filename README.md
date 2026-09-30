@@ -66,7 +66,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 - 12V가 늦게 들어와도 500ms마다 재시도한다
 - 속도는 `app.c`의 `SPEED_1` / `SPEED_2` (1 = 0.229 rpm), 방향은 `LEFT_DIR` / `RIGHT_DIR`
 
-## 스위치 (켜짐 = 핀 HIGH, `sw.c` 의 `SW_ON_LEVEL`) 와 ROS 명령
+## 스위치 (켜짐 = 핀 LOW, `sw.c` 의 `SW_ON_LEVEL`) 와 ROS 명령
 
 위에서부터 먼저 맞는 것 하나만 적용된다.
 
