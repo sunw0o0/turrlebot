@@ -32,6 +32,14 @@ void host_init(void)
   /* "바이트를 받으면 인터럽트를 걸어라" 켜기.
      (NVIC 쪽 USART6 인터럽트는 CubeMX 가 켜 준다) */
   LL_USART_EnableIT_RXNE(HOST_USART);
+
+  /* 켜질 때 한 번 인사를 보낸다 (배선 확인용).
+     - 젯슨에서 이 글자가 보이면 STM32 -> 젯슨 방향은 정상
+     - J10 3번(TX)과 4번(RX)을 점퍼로 이으면 이 글자가 자기에게 돌아와
+       에코가 계속 반복되어 g_host_rx_bytes / g_host_tx_bytes 가 계속 늘어난다
+       (= STM32 쪽 UART 와 J10 커넥터는 정상) */
+  const uint8_t hello[] = "STM32 ready\r\n";
+  host_write(hello, sizeof(hello) - 1);
 }
 
 /* USART6 인터럽트가 걸릴 때마다 호출된다 (stm32f4xx_it.c) */

@@ -5,14 +5,14 @@
 STM32 는 받은 바이트를 그대로 돌려보낸다.
 보낸 문자열이 그대로 돌아오면 배선 / 포트 / 통신 속도가 맞는 것이다.
 
-사용법:  python3 echo_test.py            (기본 /dev/ttyTHS1)
-         python3 echo_test.py /dev/ttyTHS2
+사용법:  python3 echo_test.py            (기본 /dev/ttyTHS2, Orin Nano 40핀 8/10번)
+         python3 echo_test.py /dev/ttyTHS1
 """
 import sys
 import time
 import serial
 
-port = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyTHS1"
+port = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyTHS2"
 ser = serial.Serial(port, 115200, timeout=0.5)
 ser.reset_input_buffer()
 print(f"{port} 열림. Ctrl+C 로 종료")
