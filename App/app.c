@@ -59,6 +59,7 @@
 #define STATUS_PERIOD_MS 100       /* 젯슨에 상태 보고하는 주기 */
 #define UPDATE_PERIOD_MS 50        /* 속도 명령 보내는 주기 */
 #define RETRY_PERIOD_MS  500     /* 모터를 못 찾았을 때 다시 찾는 주기 */
+#define CHECK_PERIOD_MS  1000      /* 모터 전압 / 에러 / 토크를 다시 읽는 주기 */
 
 /* 모터를 찾을 때 시도할 통신 속도 (앞에서부터 차례로) */
 static const uint32_t bauds[] = { 1000000, 57600, 115200, 2000000, 9600 };
@@ -79,6 +80,7 @@ volatile int      g_dxl_reboots;    /* 에러 때문에 재부팅한 횟수 */
 volatile uint16_t g_dxl_volt[2];    /* 모터가 측정한 지금 전압 */
 volatile uint16_t g_dxl_volt_min[2];/* 모터에 설정된 전압 하한 */
 volatile uint16_t g_dxl_volt_max[2];/* 모터에 설정된 전압 상한 */
+volatile uint8_t  g_dxl_torque[2];  /* 모터 토크 (1 = 켜짐, 0 = 모터가 스스로 끔) */
 volatile uint32_t g_dxl_rx_bytes;   /* 받은 바이트 수 (0 = 배선 문제) */
 volatile uint8_t  g_sw_on;          /* 켜진 스위치 (bit0 = S1 ... bit3 = S4) */
 volatile int32_t  g_speed;          /* 스위치 테스트 모드 속도 */
@@ -94,6 +96,7 @@ static uint8_t  ids[2];             /* 찾은 모터 ID ([0] 왼쪽, [1] 오른�
 static int      count;              /* 찾은 모터 수 */
 static uint32_t last_tick;          /* 마지막으로 일한 시각 (ms) */
 static uint32_t last_status_tick;   /* 마지막으로 상태를 보고한 시각 */
+static uint32_t last_check_tick;    /* 마지막으로 모터 상태를 읽은 시각 */
 static uint32_t last_cmd_tick;      /* 마지막으로 ROS 명령을 받은 시각 */
 static int      has_cmd;            /* ROS 명령을 한 번이라도 받았는지 */
 
@@ -218,6 +221,35 @@ static int motors_setup(void)
 
   g_dxl_err = 0;
   return 1;
+}
+
+/*
+ * 달리는 중에 모터 상태 다시 읽기 (1초마다)
+ * 전압, 하드웨어 에러, 토크를 읽어 디버거 변수와 젯슨 상태 보고에 반영한다.
+ * 모터가 과부하 등으로 토크를 스스로 껐으면 0 을 돌려준다 -> 다시 설정(재부팅)한다.
+ */
+static int check_motors(void)
+{
+  int ok = 1;
+
+  for (int i = 0; i < count; i++) {
+    uint8_t buf[2];
+    uint8_t value;
+
+    if (dxl_read(ids[i], MX64_ADDR_PRESENT_VOLTAGE, 2, buf) >= 0) {
+      g_dxl_volt[i] = buf[0] | (buf[1] << 8);
+    }
+    if (dxl_read(ids[i], MX64_ADDR_HARDWARE_ERROR, 1, &value) >= 0) {
+      g_dxl_hw_err[i] = value;
+    }
+    if (dxl_read(ids[i], MX64_ADDR_TORQUE_ENABLE, 1, &value) >= 0) {
+      g_dxl_torque[i] = value;
+      if (value == 0) {
+        ok = 0;                  /* 토크가 꺼짐 -> 명령을 보내도 안 돈다 */
+      }
+    }
+  }
+  return ok;
 }
 
 /*
@@ -418,6 +450,15 @@ void app_loop(void)
       last_tick = HAL_GetTick();
     }
     return;
+  }
+
+  /* ---- 준비 됨: 1초마다 모터 상태 확인. 토크가 꺼졌으면 다시 설정 ---- */
+  if (now - last_check_tick >= CHECK_PERIOD_MS) {
+    last_check_tick = now;
+    if (!check_motors()) {
+      g_dxl_ready = 0;           /* 다음 루프에서 motors_setup() 이 재부팅까지 해 준다 */
+      return;
+    }
   }
 
   /* ---- 준비 됨: 0.05초마다 속도 정해서 보내기 ---- */

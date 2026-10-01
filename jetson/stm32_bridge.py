@@ -61,7 +61,7 @@ class Stm32Bridge(Node):
                 self.get_logger().warn("USB 끊김 -> 다시 연결 기다리는 중")
 
         for st in self.link.read_status():
-            key = (st["ready"], st["state"], st["sw"], st["hw_err"])
+            key = (st["ready"], st["state"], st["sw"], st["hw_err"], round(st["volt"]))
             if key != self.last_state:
                 self.last_state = key
                 self.get_logger().info(
