@@ -47,6 +47,11 @@
 #define LEFT_DIR  (+1)
 #define RIGHT_DIR (-1)
 
+/* 어느 모터가 왼쪽인지. 1 = ID 가 작은 모터가 왼쪽, 0 = ID 가 큰 모터가 왼쪽.
+   teleop 에서 j(왼쪽 회전)를 눌렀는데 오른쪽으로 돌면서 i 는 앞으로 가면
+   이 값을 바꾸고 LEFT_DIR / RIGHT_DIR 부호도 서로 바꾼다. */
+#define LEFT_IS_SMALLER_ID 1
+
 /* ---- 로봇 치수 (임시값! 실제 로봇에 맞게 바꾸기) ---- */
 #define WHEEL_RADIUS_M     0.05f   /* 바퀴 반지름 r (m) */
 /* 좌우 바퀴 사이 거리는 젯슨 쪽 (stm_bridge.yaml 의 wheel_separation) 에서 쓴다 */
@@ -113,11 +118,14 @@ static int find_motors(void)
     count = dxl_scan(ids, 2);
 
     if (count > 0) {
-      /* ID 가 작은 모터를 왼쪽([0]) 으로 */
-      if (count == 2 && ids[0] > ids[1]) {
-        uint8_t temp = ids[0];
-        ids[0] = ids[1];
-        ids[1] = temp;
+      /* 왼쪽 모터를 [0] 으로 (LEFT_IS_SMALLER_ID 참고) */
+      if (count == 2) {
+        int first_is_bigger = (ids[0] > ids[1]);
+        if (first_is_bigger == LEFT_IS_SMALLER_ID) {
+          uint8_t temp = ids[0];
+          ids[0] = ids[1];
+          ids[1] = temp;
+        }
       }
       g_dxl_baud = bauds[i];
       return 1;
