@@ -7,7 +7,7 @@ ROS 없이 키보드로 STM32 에 속도 명령 보내기 (통신 테스트용)
   스페이스 : 정지
   q : 종료
 
-STM32 스위치: S1 켜기, S2 끄기 (그래야 ROS 명령대로 움직인다)
+STM32 스위치: S1 켜기, S2 끄기 (그래야 젯슨 명령대로 움직인다)
 
 사용법:  python3 teleop_test.py               (기본 /dev/ttyUSB0)
          python3 teleop_test.py /dev/ttyUSB1

@@ -2,7 +2,8 @@
 """
 ROS 2 노드: /cmd_vel (geometry_msgs/Twist) -> STM32
 
-  - /cmd_vel 의 linear.x (m/s), angular.z (rad/s) 를 20Hz 로 STM32 에 보낸다.
+  - /cmd_vel 의 linear.x (m/s), angular.z (rad/s) 를 왼쪽/오른쪽 바퀴 속도로 바꿔
+    20Hz 로 STM32 에 보낸다. (팀 C++ stm 패키지와 같은 일. 빌드 없이 쓰는 파이썬 버전)
   - /cmd_vel 이 0.5초 넘게 안 오면 0 을 보낸다 (STM32 도 0.3초 끊기면 스스로 정지).
   - STM32 상태 패킷은 상태가 바뀔 때 로그로 출력한다.
 
@@ -28,8 +29,9 @@ class Stm32Bridge(Node):
         super().__init__("stm32_bridge")
         port = self.declare_parameter("port", "/dev/ttyUSB0").value
         self.timeout = self.declare_parameter("cmd_timeout", 0.5).value
+        separation = self.declare_parameter("wheel_separation", 0.160).value
 
-        self.link = Stm32Link(port)
+        self.link = Stm32Link(port, separation=separation)
         self.v = 0.0
         self.w = 0.0
         self.last_cmd = 0.0

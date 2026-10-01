@@ -10,11 +10,12 @@ CubeMX 재생성 시 `Core/`의 USER CODE 밖은 덮어써지므로 직접 작�
 |---|---|
 | `App/dxl.c/h` | Dynamixel Protocol 2.0 (ping / broadcast ping / read / write / sync write, CRC, byte stuffing, TX echo 무시) |
 | `App/mx64.c/h` | MX-64(2.0) Control Table, 속도 모드(Operating Mode 1), Goal Velocity |
-| `App/app.c/h` | ROS 속도 명령(cmd_vel) / 스위치에 따라 두 바퀴 구동 |
-| `App/proto.c/h` | 젯슨 <-> STM32 패킷 규칙 (속도 명령, 상태 보고) |
+| `App/app.c/h` | 젯슨 바퀴 속도 명령 / 스위치에 따라 두 바퀴 구동 |
+| `App/proto.c/h` | 젯슨 <-> STM32 패킷 규칙 (바퀴 속도 명령, 상태 보고) |
 | `App/sw.c/h` | 보드 슬라이드 스위치 S1~S4 (PB12~PB15) 읽기 |
 | `App/host.c/h` | 젯슨과 시리얼 통신 (USART6, 인터럽트 수신) |
-| `jetson/stm32_bridge.py` | ROS 2 노드: `/cmd_vel` -> STM32 |
+| `jetson/stm32_bridge.py` | ROS 2 노드: `/cmd_vel` -> 바퀴 속도 -> STM32 (팀 C++ `stm_bridge` 의 파이썬 버전) |
+| `jetson/lane_follower.py` | ROS 2 노드: `/lane_info` -> `/cmd_vel` (차선 따라가기 PD 제어) |
 | `jetson/teleop_test.py` | ROS 없이 키보드(w/s/a/d)로 속도 명령 테스트 |
 | `jetson/stm32_link.py` | 위 두 스크립트가 쓰는 패킷 코드 |
 | `jetson/echo_test.py` | 에코 테스트 (예전 에코 펌웨어용, 지금 펌웨어에서는 FAIL 이 정상) |
@@ -74,39 +75,70 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 |---|---|---|
 | S2 (PB13) 켜짐 | 비상 정지 | 2 |
 | S1 (PB12) 꺼짐 | 정지 | 0 |
-| ROS 속도 명령이 0.3초 안에 옴 | 명령대로 주행 | 1 |
+| 젯슨 바퀴 명령이 0.3초 안에 옴 | 명령대로 주행 | 1 |
 | S3 (PB14) 또는 S4 (PB15) 켜짐 | 고정 속도 테스트 (S4 = `SPEED_1`, S3 = `SPEED_2`, S4 우선) | 5 |
 | 그 외 | 정지 (명령 기다림) | 3 |
 
 모터 준비가 안 됐으면 `g_state` = 4. **S1 만 켜고 ROS 명령이 없으면 정지한다** (예전과 다름). 스위치로만 굴리려면 S1 + S3 또는 S1 + S4.
 
-## ROS 속도 명령 (cmd_vel)
+## 젯슨 -> STM32 바퀴 속도 명령
 
-- 선속도 v (m/s, 앞 +), 각속도 w (rad/s, 왼쪽 회전 +) -> 두 바퀴 속도 (차동 구동)
-  - 왼쪽 = (v - w·L/2) / r, 오른쪽 = (v + w·L/2) / r  [rad/s] -> rpm -> ÷ 0.229
-- 로봇 치수는 **임시값**: `WHEEL_RADIUS_M` = 0.05 m, `WHEEL_SEPARATION_M` = 0.30 m (`app.c`). 실제로 재서 바꿀 것
-- 안전 제한: v 최대 0.3 m/s, w 최대 1.5 rad/s, 모터 값 최대 250 (약 57 rpm, 넘으면 두 바퀴를 같은 비율로 줄임)
+팀 저장소(`lkh0320/Robit_intelligence_turtlebot_team`)의 `stm` 패키지 `protocol.hpp` 와 같은 규칙이다.
+
+```
+[AA] [55] [01] [04] [왼쪽 mm/s int16] [오른쪽 mm/s int16] [CHK]     젯슨 -> STM32
+[AA] [55] [81] [07] [준비, 상태, 스위치, 에러0, 에러1, 전압 uint16] [CHK]   STM32 -> 젯슨 (0.1초마다)
+```
+
+- `cmd_vel`(v, w) -> 바퀴 속도 변환은 **젯슨**에서 한다: 왼쪽 = v - w·L/2, 오른쪽 = v + w·L/2 (L = `wheel_separation`, 팀 `stm_bridge.yaml`)
+- STM32 는 바퀴 선속도(m/s) / r -> rad/s -> rpm -> ÷ 0.229 로 MX-64 값을 만든다
+- 바퀴 반지름 `WHEEL_RADIUS_M` = 0.05 m 는 **임시값** (`app.c`). 실제로 재서 바꿀 것
+- 안전 제한: 바퀴 속도 최대 0.3 m/s, 모터 값 최대 250 (넘으면 두 바퀴를 같은 비율로 줄임)
 - 0.3초 동안 명령이 없으면 정지. 젯슨은 멈춰 있을 때도 20Hz 로 계속 보낸다
-- 패킷 규칙은 `App/proto.h` 참고
+- 팀 C++ `stm_bridge` 는 0x81 상태 패킷을 몰라서 5초마다 `Unknown frame id=0x81` 경고를 찍는다 (동작에는 문제 없음)
 
-젯슨에서 (`pip3 install pyserial`, 스크립트 3개는 같은 폴더에):
+## 차선 따라가기 (젯슨, ROS 2)
+
+```
+카메라 -> bird_eye_view -> lane_detection --/lane_info--> lane_follower --/cmd_vel--> stm_bridge --시리얼--> STM32
+                     (팀 저장소)                        (jetson/lane_follower.py)     (팀 C++ 또는 stm32_bridge.py)
+```
+
+`lane_follower.py` 는 `LaneInfo` 의 offset(차선 중심이 오른쪽이면 +), angle(차선이 오른쪽으로 휘면 +) 로 PD 제어:
+`w = -(kp_offset·offset + kd_offset·d(offset)/dt + kp_angle·angle)`, 많이 꺾을수록 느리게. 차선을 0.5초 못 보면 정지.
 
 ```bash
-# ROS 없이 키보드 테스트
-python3 teleop_test.py /dev/ttyUSB0
-
-# ROS 2
+# 공통 (터미널마다)
 source /opt/ros/jazzy/setup.bash
-python3 stm32_bridge.py --ros-args -p port:=/dev/ttyUSB0
-ros2 run teleop_twist_keyboard teleop_twist_keyboard     # 다른 터미널
+source ~/Robit_intelligence_turtlebot_team/colcon_ws/install/setup.bash
+
+# 1. 카메라 + 비전
+ros2 launch vision_bringup camera_vision.launch.py
+# 2. STM32 브리지 (둘 중 하나)
+ros2 launch stm stm_bridge.launch.py
+python3 ~/turrlebot/jetson/stm32_bridge.py --ros-args -p port:=/dev/ttyUSB0
+# 3. 차선 따라가기
+python3 ~/turrlebot/jetson/lane_follower.py --ros-args -p base_speed:=0.05
 ```
+
+| 파라미터 | 기본 | 뜻 |
+|---|---|---|
+| `base_speed` | 0.08 | 직선 속도 (m/s) |
+| `min_speed` | 0.03 | 크게 꺾을 때 최소 속도 |
+| `kp_offset` | 0.8 | 옆으로 벗어난 만큼 돌기 |
+| `kd_offset` | 0.05 | 벗어나는 속도만큼 미리 돌기 (좌우로 흔들리면 키움) |
+| `kp_angle` | 1.0 | 차선이 휜 만큼 돌기 |
+| `max_angular` | 1.2 | 회전 최대 (rad/s) |
+| `lost_timeout` | 0.5 | 차선을 이만큼 못 보면 정지 (s) |
+
+ROS 없이 키보드 테스트: `python3 teleop_test.py /dev/ttyUSB0` (`stm32_link.py` 와 같은 폴더)
 
 디버거:
 
 | 변수 | 의미 |
 |---|---|
 | `g_state` | 위 표의 상태 |
-| `g_cmd_lin_mm`, `g_cmd_ang_mrad` | 마지막으로 받은 선속도 (mm/s), 각속도 (mrad/s) |
+| `g_cmd_left_mm`, `g_cmd_right_mm` | 마지막으로 받은 왼쪽/오른쪽 바퀴 속도 (mm/s) |
 | `g_goal` | 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 (방향 부호 곱하기 전) |
 | `g_proto_ok`, `g_proto_bad` | 제대로 받은 패킷 수, 깨진 패킷 수 |
 | `g_sw_on`, `g_speed` | 켜진 스위치 (bit0=S1 ... bit3=S4), 스위치 테스트 속도 |

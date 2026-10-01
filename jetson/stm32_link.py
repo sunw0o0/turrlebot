@@ -1,20 +1,25 @@
 """
-stm32_link.py - 젯슨 <-> STM32 패킷 주고받기 (App/proto.h 와 같은 규칙)
+stm32_link.py - 젯슨 <-> STM32 패킷 주고받기 (App/proto.h, 팀 stm/protocol.hpp 와 같은 규칙)
 
   [0xAA] [0x55] [CMD] [LEN] [DATA ...] [CHK]
   CHK = (CMD + LEN + DATA) 합의 아래 8비트
+
+  젯슨 -> STM32 : CMD 0x01, 왼쪽 바퀴 mm/s (int16), 오른쪽 바퀴 mm/s (int16)
 """
 import struct
 import serial
 
 HEAD1 = 0xAA
 HEAD2 = 0x55
-CMD_VEL = 0x01
+CMD_WHEEL = 0x01
+
+# 좌우 바퀴 사이 거리 (m). 팀 stm_bridge.yaml 의 wheel_separation 과 같게. 실측 후 수정
+WHEEL_SEPARATION = 0.160
 CMD_STATUS = 0x81
 
 STATE_NAMES = {
     0: "STOP_SW (S1 꺼짐)",
-    1: "ROS 주행",
+    1: "주행 (젯슨 명령)",
     2: "ESTOP (S2 켜짐)",
     3: "NO_CMD (명령 끊김)",
     4: "NOT_READY (모터 준비 안 됨)",
@@ -27,11 +32,18 @@ def build_packet(cmd, data):
     return bytes([HEAD1, HEAD2, cmd, len(data)]) + bytes(data) + bytes([chk])
 
 
-def vel_packet(linear_mps, angular_rps):
-    """선속도 (m/s), 각속도 (rad/s) -> 속도 명령 패킷"""
-    lin = max(-32768, min(32767, int(round(linear_mps * 1000))))
-    ang = max(-32768, min(32767, int(round(angular_rps * 1000))))
-    return build_packet(CMD_VEL, struct.pack("<hh", lin, ang))
+def wheel_packet(left_mps, right_mps):
+    """왼쪽/오른쪽 바퀴 선속도 (m/s) -> 바퀴 명령 패킷"""
+    left = max(-32768, min(32767, int(round(left_mps * 1000))))
+    right = max(-32768, min(32767, int(round(right_mps * 1000))))
+    return build_packet(CMD_WHEEL, struct.pack("<hh", left, right))
+
+
+def twist_to_wheels(linear_mps, angular_rps, separation=WHEEL_SEPARATION):
+    """로봇 선속도 v, 각속도 w -> 왼쪽/오른쪽 바퀴 선속도 (차동 구동)"""
+    left = linear_mps - angular_rps * separation / 2.0
+    right = linear_mps + angular_rps * separation / 2.0
+    return left, right
 
 
 class Stm32Link:
@@ -40,7 +52,8 @@ class Stm32Link:
     프로그램이 죽지 않고 다시 연결될 때까지 조용히 재시도한다.
     """
 
-    def __init__(self, port="/dev/ttyUSB0", baud=115200):
+    def __init__(self, port="/dev/ttyUSB0", baud=115200, separation=WHEEL_SEPARATION):
+        self.separation = separation
         self.port = port
         self.baud = baud
         self.ser = serial.Serial(port, baud, timeout=0)
@@ -71,10 +84,16 @@ class Stm32Link:
         return True
 
     def send_vel(self, linear_mps, angular_rps):
+        """로봇 선속도 (m/s), 각속도 (rad/s) 로 명령 (바퀴 속도로 바꿔서 보냄)"""
+        left, right = twist_to_wheels(linear_mps, angular_rps, self.separation)
+        self.send_wheels(left, right)
+
+    def send_wheels(self, left_mps, right_mps):
+        """왼쪽/오른쪽 바퀴 선속도 (m/s) 로 명령"""
         if not self._ensure_open():
             return
         try:
-            self.ser.write(vel_packet(linear_mps, angular_rps))
+            self.ser.write(wheel_packet(left_mps, right_mps))
         except (serial.SerialException, OSError):
             self._lost()
 

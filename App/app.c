@@ -9,7 +9,7 @@
  *    3. 모터 설정   : 에러 있으면 재부팅 -> 속도 모드 -> 토크 ON
  *
  *  app_loop()  (while(1) 안에서 계속)
- *    - 젯슨에서 온 패킷 처리 (속도 명령 cmd_vel 저장)
+ *    - 젯슨에서 온 패킷 처리 (왼쪽/오른쪽 바퀴 속도 명령 저장)
  *    - 0.1초마다 젯슨에 상태 보고
  *    - 준비 안 됐으면 : 0.5초마다 2~3 다시 시도 (12V 를 늦게 켜도 됨)
  *    - 준비 됐으면     : 0.05초마다 속도 정하기 -> 모터에 전송
@@ -18,15 +18,14 @@
  *
  *   S2 켜짐                          -> 비상 정지
  *   S1 꺼짐                          -> 정지
- *   ROS 명령(cmd_vel) 이 0.3초 안에 옴 -> 그 명령대로 주행
+ *   젯슨 바퀴 명령이 0.3초 안에 옴   -> 그 명령대로 주행
  *   S3 또는 S4 켜짐                  -> 고정 속도 테스트 (S4 = 1단, S3 = 2단)
  *   그 외 (ROS 명령 끊김)            -> 정지
  *
- * ============ cmd_vel -> 바퀴 속도 (차동 구동) ============
+ * ============ 바퀴 속도 -> MX-64 값 ============
  *
- *   v = 선속도 (m/s, 앞 +),  w = 각속도 (rad/s, 왼쪽 회전 +)
- *   왼쪽 바퀴  (rad/s) = (v - w * L/2) / r
- *   오른쪽 바퀴 (rad/s) = (v + w * L/2) / r
+ *   젯슨(팀 stm 패키지)이 cmd_vel 을 왼쪽/오른쪽 바퀴 선속도(mm/s)로 바꿔서 보낸다.
+ *   바퀴 각속도 (rad/s) = 바퀴 선속도 (m/s) / r      (r = 바퀴 반지름)
  *   MX-64 값 = rpm / 0.229,   rpm = rad/s * 60 / (2 * pi)
  */
 #include "app.h"
@@ -50,11 +49,10 @@
 
 /* ---- 로봇 치수 (임시값! 실제 로봇에 맞게 바꾸기) ---- */
 #define WHEEL_RADIUS_M     0.05f   /* 바퀴 반지름 r (m) */
-#define WHEEL_SEPARATION_M 0.30f   /* 좌우 바퀴 중심 사이 거리 L (m) */
+/* 좌우 바퀴 사이 거리는 젯슨 쪽 (stm_bridge.yaml 의 wheel_separation) 에서 쓴다 */
 
 /* ---- 안전 제한 ---- */
-#define MAX_LINEAR_MPS  0.30f      /* 선속도 최대 (m/s) */
-#define MAX_ANGULAR_RPS 1.50f      /* 각속도 최대 (rad/s) */
+#define MAX_WHEEL_MPS   0.30f      /* 바퀴 선속도 최대 (m/s) */
 #define MAX_GOAL        250        /* MX-64 값 최대 (약 57 rpm) */
 #define CMD_TIMEOUT_MS  300        /* 이 시간 동안 ROS 명령이 없으면 정지 */
 
@@ -84,8 +82,8 @@ volatile uint16_t g_dxl_volt_max[2];/* 모터에 설정된 전압 상한 */
 volatile uint32_t g_dxl_rx_bytes;   /* 받은 바이트 수 (0 = 배선 문제) */
 volatile uint8_t  g_sw_on;          /* 켜진 스위치 (bit0 = S1 ... bit3 = S4) */
 volatile int32_t  g_speed;          /* 스위치 테스트 모드 속도 */
-volatile int16_t  g_cmd_lin_mm;     /* 받은 선속도 (mm/s) */
-volatile int16_t  g_cmd_ang_mrad;   /* 받은 각속도 (mrad/s) */
+volatile int16_t  g_cmd_left_mm;    /* 받은 왼쪽 바퀴 속도 (mm/s) */
+volatile int16_t  g_cmd_right_mm;   /* 받은 오른쪽 바퀴 속도 (mm/s) */
 volatile int32_t  g_goal[2];        /* 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 */
 volatile uint8_t  g_state;          /* PROTO_STATE_* (proto.h) */
 
@@ -262,10 +260,10 @@ static void handle_host(void)
     if (!proto_feed(b, &pkt)) {
       continue;                  /* 아직 패킷이 다 안 모임 */
     }
-    if (pkt.cmd == PROTO_CMD_VEL && pkt.len == 4) {
+    if (pkt.cmd == PROTO_CMD_WHEEL && pkt.len == 4) {
       /* 2바이트씩 작은 자리 먼저 -> 부호 있는 16비트 정수 */
-      g_cmd_lin_mm   = (int16_t)(pkt.data[0] | (pkt.data[1] << 8));
-      g_cmd_ang_mrad = (int16_t)(pkt.data[2] | (pkt.data[3] << 8));
+      g_cmd_left_mm  = (int16_t)(pkt.data[0] | (pkt.data[1] << 8));
+      g_cmd_right_mm = (int16_t)(pkt.data[2] | (pkt.data[3] << 8));
       last_cmd_tick = HAL_GetTick();
       has_cmd = 1;
     }
@@ -291,19 +289,7 @@ static void send_status(void)
 }
 
 
-/* ==================== cmd_vel -> 바퀴 값 ==================== */
-
-/* value 를 -limit ~ +limit 사이로 자른다 */
-static float clampf(float value, float limit)
-{
-  if (value > limit) {
-    return limit;
-  }
-  if (value < -limit) {
-    return -limit;
-  }
-  return value;
-}
+/* ==================== 바퀴 속도 -> MX-64 값 ==================== */
 
 /* 바퀴 각속도 (rad/s) -> MX-64 Goal Velocity 값 (소수) */
 static float wheel_to_goal(float wheel_rad_s)
@@ -331,27 +317,32 @@ static float absf(float value)
   return value;
 }
 
-/* 선속도(mm/s), 각속도(mrad/s) -> 왼쪽/오른쪽 MX-64 값 */
-static void cmd_vel_to_goals(int16_t lin_mm, int16_t ang_mrad,
-                             int32_t *left, int32_t *right)
+/* 왼쪽/오른쪽 바퀴 선속도(mm/s) -> 왼쪽/오른쪽 MX-64 값 */
+static void wheels_to_goals(int16_t left_mm, int16_t right_mm,
+                            int32_t *left, int32_t *right)
 {
-  float v = clampf(lin_mm / 1000.0f, MAX_LINEAR_MPS);
-  float w = clampf(ang_mrad / 1000.0f, MAX_ANGULAR_RPS);
+  float left_mps  = left_mm / 1000.0f;
+  float right_mps = right_mm / 1000.0f;
 
-  float left_rad_s  = (v - w * WHEEL_SEPARATION_M / 2.0f) / WHEEL_RADIUS_M;
-  float right_rad_s = (v + w * WHEEL_SEPARATION_M / 2.0f) / WHEEL_RADIUS_M;
+  float left_rad_s  = left_mps / WHEEL_RADIUS_M;
+  float right_rad_s = right_mps / WHEEL_RADIUS_M;
 
   float l = wheel_to_goal(left_rad_s);
   float r = wheel_to_goal(right_rad_s);
 
-  /* 한쪽이라도 MAX_GOAL 을 넘으면 두 바퀴를 같은 비율로 줄인다.
+  /* 한쪽이라도 최대를 넘으면 두 바퀴를 같은 비율로 줄인다.
      (한쪽만 자르면 도는 모양이 바뀌기 때문) */
   float biggest = absf(l);
   if (absf(r) > biggest) {
     biggest = absf(r);
   }
-  if (biggest > (float)MAX_GOAL) {
-    float scale = (float)MAX_GOAL / biggest;
+  float limit = (float)MAX_GOAL;
+  float limit_by_speed = wheel_to_goal(MAX_WHEEL_MPS / WHEEL_RADIUS_M);
+  if (limit_by_speed < limit) {
+    limit = limit_by_speed;
+  }
+  if (biggest > limit) {
+    float scale = limit / biggest;
     l = l * scale;
     r = r * scale;
   }
@@ -377,7 +368,7 @@ static uint8_t decide(uint8_t on, uint32_t now, int32_t *left, int32_t *right)
     return PROTO_STATE_STOP_SW;
   }
   if (has_cmd && (now - last_cmd_tick) < CMD_TIMEOUT_MS) {
-    cmd_vel_to_goals(g_cmd_lin_mm, g_cmd_ang_mrad, left, right);
+    wheels_to_goals(g_cmd_left_mm, g_cmd_right_mm, left, right);
     return PROTO_STATE_ROS;
   }
   if (on & (SW3 | SW4)) {

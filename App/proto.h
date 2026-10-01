@@ -10,11 +10,11 @@
  *
  * ================= 젯슨 -> STM32 =================
  *
- *   CMD 0x01  속도 명령 (LEN = 4)
- *     DATA[0..1] : 선속도  int16, 단위 mm/s    (앞 = +)
- *     DATA[2..3] : 각속도  int16, 단위 mrad/s  (왼쪽 회전 = +)
- *     예) 0.1 m/s 직진          -> 100, 0
- *         제자리 왼쪽 회전 0.5 rad/s -> 0, 500
+ *   CMD 0x01  바퀴 속도 명령 (LEN = 4)   * 팀 stm 패키지 (protocol.hpp WHEEL_CMD) 와 같음
+ *     DATA[0..1] : 왼쪽 바퀴 선속도   int16, 단위 mm/s  (앞 = +)
+ *     DATA[2..3] : 오른쪽 바퀴 선속도 int16, 단위 mm/s  (앞 = +)
+ *     예) 0.1 m/s 직진     -> 100, 100
+ *         제자리 왼쪽 회전 -> -50, 50
  *   0.3초 안에 다음 명령이 안 오면 STM32 가 스스로 정지한다.
  *   그래서 젯슨은 멈춰 있을 때도 20Hz 정도로 계속 보내야 한다.
  *
@@ -36,16 +36,16 @@
 #define PROTO_HEAD1 0xAA
 #define PROTO_HEAD2 0x55
 
-#define PROTO_CMD_VEL    0x01
+#define PROTO_CMD_WHEEL  0x01
 #define PROTO_CMD_STATUS 0x81
 
 #define PROTO_MAX_DATA 16
 
 /* 상태 값 */
 #define PROTO_STATE_STOP_SW     0   /* S1 꺼짐 -> 정지 */
-#define PROTO_STATE_ROS         1   /* ROS 명령대로 주행 중 */
+#define PROTO_STATE_ROS         1   /* 젯슨 바퀴 명령대로 주행 중 */
 #define PROTO_STATE_ESTOP       2   /* S2 켜짐 -> 비상 정지 */
-#define PROTO_STATE_NO_CMD      3   /* ROS 명령이 0.3초 넘게 없음 -> 정지 */
+#define PROTO_STATE_NO_CMD      3   /* 젯슨 명령이 0.3초 넘게 없음 -> 정지 */
 #define PROTO_STATE_NOT_READY   4   /* 모터 준비 안 됨 */
 #define PROTO_STATE_MANUAL      5   /* 스위치 고정 속도 테스트 */
 
