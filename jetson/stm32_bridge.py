@@ -61,12 +61,14 @@ class Stm32Bridge(Node):
                 self.get_logger().warn("USB 끊김 -> 다시 연결 기다리는 중")
 
         for st in self.link.read_status():
-            key = (st["ready"], st["state"], st["sw"], st["hw_err"], round(st["volt"]))
+            key = (st["ready"], st["state"], st["sw"], st["hw_err"], round(st["volt"]),
+                   st["count"], st["torque"])
             if key != self.last_state:
                 self.last_state = key
                 self.get_logger().info(
                     f"STM32: {st['state_name']}, 준비={st['ready']}, "
-                    f"스위치={st['sw']:04b}, 에러={st['hw_err']}, 전압={st['volt']:.1f}V")
+                    f"스위치={st['sw']:04b}, 에러={st['hw_err']}, 전압={st['volt']:.1f}V, "
+                    f"모터수={st['count']}, ID={st['ids']}, 토크={st['torque']}")
 
     def destroy_node(self):
         self.link.close()

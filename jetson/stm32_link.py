@@ -125,9 +125,14 @@ class Stm32Link:
                 del self.buf[:1]           # 헤더가 가짜였음. 한 바이트 넘기고 다시
                 continue
             del self.buf[:5 + length]
-            if cmd == CMD_STATUS and length == 7:
-                ready, state, sw, hw0, hw1, volt = struct.unpack("<BBBBBH", data)
+            if cmd == CMD_STATUS and length >= 7:
+                ready, state, sw, hw0, hw1, volt = struct.unpack("<BBBBBH", data[:7])
+                count, id_l, id_r, torque = (data[7], data[8], data[9], data[10]) \
+                    if length >= 11 else (None, None, None, None)
                 out.append({
+                    "count": count,
+                    "ids": (id_l, id_r),
+                    "torque": None if torque is None else (torque & 1, (torque >> 1) & 1),
                     "ready": ready,
                     "state": state,
                     "state_name": STATE_NAMES.get(state, str(state)),

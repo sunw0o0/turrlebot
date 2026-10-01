@@ -63,7 +63,8 @@ try:
                 print(f"보냄 v={v:+.2f} m/s w={w:+.1f} rad/s | "
                       f"STM32: {status['state_name']}, 준비={status['ready']}, "
                       f"스위치={status['sw']:04b}, 에러={status['hw_err']}, "
-                      f"전압={status['volt']:.1f}V, 재연결={link.reconnects}")
+                      f"전압={status['volt']:.1f}V, 모터수={status['count']}, "
+                      f"ID={status['ids']}, 토크={status['torque']}, 재연결={link.reconnects}")
             else:
                 print(f"보냄 v={v:+.2f} w={w:+.1f} | STM32 상태 패킷 아직 없음 (배선/포트 확인)")
 finally:

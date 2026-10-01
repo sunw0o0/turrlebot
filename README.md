@@ -63,7 +63,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 | `g_dxl_reboots` | 하드웨어 에러를 지우려고 재부팅한 횟수 (계속 늘어나면 원인이 남아 있음) |
 | `g_dxl_rx_bytes` | 받은 바이트 수. **모터를 못 찾았을 때만** 기록되고, 찾으면 0으로 남는다. 못 찾았는데 0이면 에코도 안 돌아옴 = MCU~RS-485 칩 배선 문제, 0보다 크면 모터 쪽(A/B 배선, 12V, 통신 속도) 문제 |
 | `g_dxl_volt`, `g_dxl_volt_min`, `g_dxl_volt_max` | 모터가 측정한 전압과 허용 범위 (0.1V 단위, 120 = 12.0V). 전압과 에러는 달리는 중에도 1초마다 다시 읽는다 |
-| `g_dxl_torque` | 모터 토크 (1 = 켜짐). 모터가 스스로 토크를 끄면 다시 설정(필요하면 재부팅)한다 |
+| `g_dxl_torque` | 모터 토크 (1 = 켜짐, 젯슨 상태 보고에도 포함). 모터가 스스로 토크를 끄면 다시 설정(필요하면 재부팅)한다 |
 
 - 12V가 늦게 들어와도 500ms마다 재시도한다
 - 속도는 `app.c`의 `SPEED_1` / `SPEED_2` (1 = 0.229 rpm), 방향은 `LEFT_DIR` / `RIGHT_DIR`
@@ -88,7 +88,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 
 ```
 [AA] [55] [01] [04] [왼쪽 mm/s int16] [오른쪽 mm/s int16] [CHK]     젯슨 -> STM32
-[AA] [55] [81] [07] [준비, 상태, 스위치, 에러0, 에러1, 전압 uint16] [CHK]   STM32 -> 젯슨 (0.1초마다)
+[AA] [55] [81] [0B] [준비, 상태, 스위치, 에러0, 에러1, 전압 uint16, 모터 수, ID왼, ID오, 토크 비트] [CHK]   STM32 -> 젯슨 (0.1초마다)
 ```
 
 - `cmd_vel`(v, w) -> 바퀴 속도 변환은 **젯슨**에서 한다: 왼쪽 = v - w·L/2, 오른쪽 = v + w·L/2 (L = `wheel_separation`, 팀 `stm_bridge.yaml`)

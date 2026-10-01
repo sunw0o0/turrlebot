@@ -217,6 +217,7 @@ static int motors_setup(void)
       g_dxl_err = ret;
       return 0;
     }
+    g_dxl_torque[i] = (uint8_t)torque_is_on(ids[i]);
   }
 
   g_dxl_err = 0;
@@ -305,8 +306,8 @@ static void handle_host(void)
 /* 젯슨에 상태 패킷을 보낸다 */
 static void send_status(void)
 {
-  uint8_t data[7];
-  uint8_t buf[7 + 5];
+  uint8_t data[PROTO_STATUS_LEN];
+  uint8_t buf[PROTO_STATUS_LEN + 5];
 
   data[0] = (uint8_t)g_dxl_ready;
   data[1] = g_state;
@@ -315,8 +316,12 @@ static void send_status(void)
   data[4] = g_dxl_hw_err[1];
   data[5] = (uint8_t)(g_dxl_volt[0] & 0xFF);
   data[6] = (uint8_t)(g_dxl_volt[0] >> 8);
+  data[7] = (uint8_t)g_dxl_count;            /* 찾은 모터 수 */
+  data[8] = g_dxl_ids[0];                    /* 왼쪽 모터 ID */
+  data[9] = g_dxl_ids[1];                    /* 오른쪽 모터 ID */
+  data[10] = (uint8_t)(g_dxl_torque[0] | (g_dxl_torque[1] << 1));  /* bit0 왼쪽, bit1 오른쪽 */
 
-  uint16_t n = proto_build(PROTO_CMD_STATUS, data, 7, buf);
+  uint16_t n = proto_build(PROTO_CMD_STATUS, data, PROTO_STATUS_LEN, buf);
   host_write(buf, n);
 }
 

@@ -20,13 +20,17 @@
  *
  * ================= STM32 -> 젯슨 =================
  *
- *   CMD 0x81  상태 (LEN = 7), 0.1초마다
+ *   CMD 0x81  상태 (LEN = 11), 0.1초마다
  *     DATA[0] : 모터 준비 (1 = 준비됨)
  *     DATA[1] : 상태 (PROTO_STATE_*)
  *     DATA[2] : 켜진 스위치 (bit0 = S1 ... bit3 = S4)
  *     DATA[3] : 왼쪽 모터 하드웨어 에러
  *     DATA[4] : 오른쪽 모터 하드웨어 에러
  *     DATA[5..6] : 모터 전압 (0.1V 단위, uint16)
+ *     DATA[7] : 찾은 모터 수
+ *     DATA[8] : 왼쪽 모터 ID
+ *     DATA[9] : 오른쪽 모터 ID
+ *     DATA[10] : 토크 켜짐 (bit0 = 왼쪽, bit1 = 오른쪽)
  */
 #ifndef PROTO_H
 #define PROTO_H
@@ -40,6 +44,7 @@
 #define PROTO_CMD_STATUS 0x81
 
 #define PROTO_MAX_DATA 16
+#define PROTO_STATUS_LEN 11
 
 /* 상태 값 */
 #define PROTO_STATE_STOP_SW     0   /* S1 꺼짐 -> 정지 */
