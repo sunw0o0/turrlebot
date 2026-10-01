@@ -65,6 +65,9 @@ try:
                       f"스위치={status['sw']:04b}, 에러={status['hw_err']}, "
                       f"전압={status['volt']:.1f}V, 모터수={status['count']}, "
                       f"ID={status['ids']}, 토크={status['torque']}, 재연결={link.reconnects}")
+                if link.psd:
+                    p = link.psd
+                    print(f"    PSD 왼쪽={p['left']:.2f}m 앞={p['front']:.2f}m 오른쪽={p['right']:.2f}m")
             else:
                 print(f"보냄 v={v:+.2f} w={w:+.1f} | STM32 상태 패킷 아직 없음 (배선/포트 확인)")
 finally:

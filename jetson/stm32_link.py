@@ -16,6 +16,7 @@ CMD_WHEEL = 0x01
 # 좌우 바퀴 사이 거리 (m). 팀 stm_bridge.yaml 의 wheel_separation 과 같게. 실측 후 수정
 WHEEL_SEPARATION = 0.160
 CMD_STATUS = 0x81
+CMD_PSD = 0x10
 
 STATE_NAMES = {
     0: "STOP_SW (S1 꺼짐)",
@@ -59,6 +60,7 @@ class Stm32Link:
         self.ser = serial.Serial(port, baud, timeout=0)
         self.buf = bytearray()
         self.reconnects = 0          # 다시 연결한 횟수
+        self.psd = None              # 마지막 PSD 거리 {"left", "front", "right"} [m]
         self.connected = True
 
     def _lost(self):
@@ -125,6 +127,11 @@ class Stm32Link:
                 del self.buf[:1]           # 헤더가 가짜였음. 한 바이트 넘기고 다시
                 continue
             del self.buf[:5 + length]
+            if cmd == CMD_PSD and length == 6:
+                left, front, right = struct.unpack("<HHH", data)
+                self.psd = {"left": left / 1000.0, "front": front / 1000.0,
+                            "right": right / 1000.0}
+                continue
             if cmd == CMD_STATUS and length >= 7:
                 ready, state, sw, hw0, hw1, volt = struct.unpack("<BBBBBH", data[:7])
                 count, id_l, id_r, torque = (data[7], data[8], data[9], data[10]) \
