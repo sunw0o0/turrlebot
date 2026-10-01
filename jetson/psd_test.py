@@ -23,10 +23,11 @@ def bar(meters):
 
 
 try:
-    count = 0
+    status_count = 0
     last_print = 0.0
     while True:
-        link.read_status()             # 상태 + PSD 패킷 받기 (PSD 는 link.psd 에 저장)
+        if link.read_status():         # 상태 + PSD 패킷 받기 (PSD 는 link.psd 에 저장)
+            status_count += 1
         if link.psd and time.time() - last_print > 0.2:
             last_print = time.time()
             p = link.psd
@@ -35,8 +36,12 @@ try:
                   f"오른쪽 {p['right']:.2f}m {bar(p['right'])}")
         elif not link.psd and time.time() - last_print > 1.0:
             last_print = time.time()
-            count += 1
-            print("PSD 패킷 아직 없음 (펌웨어가 최신인지, 포트를 다른 프로그램이 쓰고 있지 않은지 확인)")
+            if status_count:
+                print(f"상태 패킷은 옴 ({status_count}개) -> STM32 는 동작 중. "
+                      "PSD 패킷만 없음 = 보드에 PSD 펌웨어(ed25f17)가 아직 안 올라감")
+            else:
+                print("아무 패킷도 없음 -> 포트를 다른 프로그램(ROS 브리지 등)이 쓰는지, "
+                      "STM32 가 멈췄는지(리셋 버튼), 배선 확인")
         time.sleep(0.01)
 except KeyboardInterrupt:
     pass
