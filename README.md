@@ -19,6 +19,7 @@ CubeMX 재생성 시 `Core/`의 USER CODE 밖은 덮어써지므로 직접 작�
 | `jetson/lane_follower.py` | ROS 2 노드: `/lane_info` -> `/cmd_vel` (차선 따라가기 PD 제어) |
 | `jetson/teleop_test.py` | ROS 없이 키보드(w/s/a/d)로 속도 명령 테스트 |
 | `jetson/stm32_link.py` | 위 두 스크립트가 쓰는 패킷 코드 |
+| `jetson/speed_test.py` | 바퀴 속도를 단계별로 올리며 두 모터의 목표 rpm 과 실제 rpm 비교 (바퀴 띄우고) |
 | `jetson/psd_test.py` | ROS 없이 PSD 거리 3개를 막대로 보기 |
 | `jetson/echo_test.py` | 에코 테스트 (예전 에코 펌웨어용, 지금 펌웨어에서는 FAIL 이 정상) |
 | `jetson/find_port.py` | ttyTHS1 / ttyTHS2 중 STM32 와 연결된 포트를 자동으로 찾는 스크립트 |
@@ -91,7 +92,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 
 ```
 [AA] [55] [01] [04] [왼쪽 mm/s int16] [오른쪽 mm/s int16] [CHK]     젯슨 -> STM32
-[AA] [55] [81] [0B] [준비, 상태, 스위치, 에러0, 에러1, 전압 uint16, 모터 수, ID왼, ID오, 토크 비트] [CHK]   STM32 -> 젯슨 (0.1초마다)
+[AA] [55] [81] [13] [준비, 상태, 스위치, 에러0, 에러1, 전압 uint16, 모터 수, ID왼, ID오, 토크 비트, 목표속도 왼/오 int16, 실제속도 왼/오 int16] [CHK]   STM32 -> 젯슨 (0.1초마다)
 [AA] [55] [10] [06] [왼쪽 mm, 앞 mm, 오른쪽 mm  uint16] [CHK]   STM32 -> 젯슨 (0.05초마다, 팀 stm_bridge 가 /psd 로 발행)
 ```
 
@@ -144,6 +145,7 @@ ROS 없이 키보드 테스트: `python3 teleop_test.py /dev/ttyUSB0` (`stm32_li
 |---|---|
 | `g_state` | 위 표의 상태 |
 | `g_cmd_left_mm`, `g_cmd_right_mm` | 마지막으로 받은 왼쪽/오른쪽 바퀴 속도 (mm/s) |
+| `g_present_vel` | 모터가 엔코더로 잰 실제 속도 ([0] 왼쪽, [1] 오른쪽, g_goal 과 같은 단위/방향, 0.1초마다) |
 | `g_goal` | 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 (방향 부호 곱하기 전) |
 | `g_proto_ok`, `g_proto_bad` | 제대로 받은 패킷 수, 깨진 패킷 수 |
 | `g_sw_on`, `g_speed` | 켜진 스위치 (bit0=S1 ... bit3=S4), 스위치 테스트 속도 |

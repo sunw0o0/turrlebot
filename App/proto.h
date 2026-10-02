@@ -25,7 +25,7 @@
  *     DATA[2..3] : 앞   거리 uint16 [mm]
  *     DATA[4..5] : 오른쪽 거리 uint16 [mm]
  *
- *   CMD 0x81  상태 (LEN = 11), 0.1초마다
+ *   CMD 0x81  상태 (LEN = 19), 0.1초마다
  *     DATA[0] : 모터 준비 (1 = 준비됨)
  *     DATA[1] : 상태 (PROTO_STATE_*)
  *     DATA[2] : 켜진 스위치 (bit0 = S1 ... bit3 = S4)
@@ -36,6 +36,8 @@
  *     DATA[8] : 왼쪽 모터 ID
  *     DATA[9] : 오른쪽 모터 ID
  *     DATA[10] : 토크 켜짐 (bit0 = 왼쪽, bit1 = 오른쪽)
+ *     DATA[11..14] : 목표 속도 왼쪽, 오른쪽 (int16, 1 = 0.229 rpm, 앞으로 = +)
+ *     DATA[15..18] : 실제 속도 왼쪽, 오른쪽 (int16, 모터 엔코더로 잰 값)
  */
 #ifndef PROTO_H
 #define PROTO_H
@@ -50,7 +52,7 @@
 #define PROTO_CMD_STATUS 0x81
 
 #define PROTO_MAX_DATA 16
-#define PROTO_STATUS_LEN 11
+#define PROTO_STATUS_LEN 19
 
 /* 상태 값 */
 #define PROTO_STATE_STOP_SW     0   /* S1 꺼짐 -> 정지 */

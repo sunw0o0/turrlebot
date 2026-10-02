@@ -66,6 +66,7 @@
 #define UPDATE_PERIOD_MS 50        /* 속도 명령 보내는 주기 */
 #define RETRY_PERIOD_MS  500     /* 모터를 못 찾았을 때 다시 찾는 주기 */
 #define CHECK_PERIOD_MS  1000      /* 모터 전압 / 에러 / 토크를 다시 읽는 주기 */
+#define VEL_PERIOD_MS    100       /* 모터 실제 속도를 읽는 주기 */
 #define PSD_PERIOD_MS    10        /* PSD 측정 주기 */
 #define PSD_SEND_MS      50        /* 젯슨에 PSD 보내는 주기 */
 
@@ -101,6 +102,7 @@ volatile int32_t  g_speed;          /* 스위치 테스트 모드 속도 */
 volatile int16_t  g_cmd_left_mm;    /* 받은 왼쪽 바퀴 속도 (mm/s) */
 volatile int16_t  g_cmd_right_mm;   /* 받은 오른쪽 바퀴 속도 (mm/s) */
 volatile int32_t  g_goal[2];        /* 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 */
+volatile int32_t  g_present_vel[2]; /* 모터가 엔코더로 잰 실제 속도 (g_goal 과 같은 단위/방향, 1 = 0.229 rpm) */
 volatile uint8_t  g_state;          /* PROTO_STATE_* (proto.h) */
 
 
@@ -111,6 +113,7 @@ static int      count;              /* 찾은 모터 수 */
 static uint32_t last_tick;          /* 마지막으로 일한 시각 (ms) */
 static uint32_t last_status_tick;   /* 마지막으로 상태를 보고한 시각 */
 static uint32_t last_check_tick;    /* 마지막으로 모터 상태를 읽은 시각 */
+static uint32_t last_vel_tick;      /* 마지막으로 실제 속도를 읽은 시각 */
 static uint32_t last_psd_tick;      /* 마지막으로 PSD 를 잰 시각 */
 static uint32_t last_psd_send_tick; /* 마지막으로 PSD 를 보낸 시각 */
 static uint32_t last_cmd_tick;      /* 마지막으로 ROS 명령을 받은 시각 */
@@ -311,6 +314,24 @@ static int check_motors(void)
 }
 
 /*
+ * 모터 실제 속도 읽기 (Present Velocity, 128번, 4바이트 부호 있는 값)
+ * 앞으로 가는 방향이 + 가 되도록 LEFT_DIR / RIGHT_DIR 을 곱해서 g_goal 과 비교하기 쉽게 한다.
+ */
+static void read_present_velocity(void)
+{
+  const int dir[2] = { LEFT_DIR, RIGHT_DIR };
+
+  for (int i = 0; i < count; i++) {
+    uint8_t buf[4];
+    if (dxl_read(ids[i], MX64_ADDR_PRESENT_VELOCITY, 4, buf) >= 0) {
+      int32_t v = (int32_t)(buf[0] | (buf[1] << 8) |
+                            ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24));
+      g_present_vel[i] = dir[i] * v;
+    }
+  }
+}
+
+/*
  * 스위치 상태로 속도를 정한다. 0 이면 정지.
  *   on & SW1  : S1 이 켜져 있으면 참
  *   !(...)    : 반대 (꺼져 있으면 참)
@@ -377,6 +398,13 @@ static void send_status(void)
   data[8] = g_dxl_ids[0];                    /* 왼쪽 모터 ID */
   data[9] = g_dxl_ids[1];                    /* 오른쪽 모터 ID */
   data[10] = (uint8_t)(g_dxl_torque[0] | (g_dxl_torque[1] << 1));  /* bit0 왼쪽, bit1 오른쪽 */
+  /* 목표 속도와 실제 속도 (int16, 1 = 0.229 rpm, 앞으로 = +) */
+  int16_t values[4] = { (int16_t)g_goal[0], (int16_t)g_goal[1],
+                        (int16_t)g_present_vel[0], (int16_t)g_present_vel[1] };
+  for (int k = 0; k < 4; k++) {
+    data[11 + k * 2]     = (uint8_t)((uint16_t)values[k] & 0xFF);
+    data[11 + k * 2 + 1] = (uint8_t)((uint16_t)values[k] >> 8);
+  }
 
   uint16_t n = proto_build(PROTO_CMD_STATUS, data, PROTO_STATUS_LEN, buf);
   host_write(buf, n);
@@ -547,6 +575,12 @@ void app_loop(void)
       g_dxl_ready = 0;           /* 다음 루프에서 motors_setup() 이 재부팅까지 해 준다 */
       return;
     }
+  }
+
+  /* ---- 준비 됨: 0.1초마다 실제 속도 읽기 ---- */
+  if (now - last_vel_tick >= VEL_PERIOD_MS) {
+    last_vel_tick = now;
+    read_present_velocity();
   }
 
   /* ---- 준비 됨: 0.05초마다 속도 정해서 보내기 ---- */

@@ -65,6 +65,10 @@ try:
                       f"스위치={status['sw']:04b}, 에러={status['hw_err']}, "
                       f"전압={status['volt']:.1f}V, 모터수={status['count']}, "
                       f"ID={status['ids']}, 토크={status['torque']}, 재연결={link.reconnects}")
+                if status.get("vel_rpm"):
+                    g, r = status["goal_rpm"], status["vel_rpm"]
+                    print(f"    목표 rpm 왼쪽={g[0]:5.1f} 오른쪽={g[1]:5.1f} | "
+                          f"실제 rpm 왼쪽={r[0]:5.1f} 오른쪽={r[1]:5.1f}")
                 if link.psd:
                     p = link.psd
                     print(f"    PSD 왼쪽={p['left']:.2f}m 앞={p['front']:.2f}m 오른쪽={p['right']:.2f}m")

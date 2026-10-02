@@ -18,6 +18,8 @@ WHEEL_SEPARATION = 0.160
 CMD_STATUS = 0x81
 CMD_PSD = 0x10
 
+RPM_PER_UNIT = 0.229          # MX-64 속도 값 1 = 0.229 rpm
+
 STATE_NAMES = {
     0: "STOP_SW (S1 꺼짐)",
     1: "주행 (젯슨 명령)",
@@ -136,7 +138,14 @@ class Stm32Link:
                 ready, state, sw, hw0, hw1, volt = struct.unpack("<BBBBBH", data[:7])
                 count, id_l, id_r, torque = (data[7], data[8], data[9], data[10]) \
                     if length >= 11 else (None, None, None, None)
+                goal = vel = None
+                if length >= 19:
+                    gl, gr, vl, vr = struct.unpack("<hhhh", data[11:19])
+                    goal = (gl * RPM_PER_UNIT, gr * RPM_PER_UNIT)   # 목표 속도 [rpm]
+                    vel = (vl * RPM_PER_UNIT, vr * RPM_PER_UNIT)    # 실제 속도 [rpm]
                 out.append({
+                    "goal_rpm": goal,
+                    "vel_rpm": vel,
                     "count": count,
                     "ids": (id_l, id_r),
                     "torque": None if torque is None else (torque & 1, (torque >> 1) & 1),
