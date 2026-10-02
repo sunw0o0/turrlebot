@@ -29,6 +29,10 @@
 #define MX64_ADDR_PRESENT_VOLTAGE  144  /* 지금 들어오는 전압, 2바이트 (0.1V 단위) */
 
 /* Operating Mode 값 */
+/* 속도 제한(44번)이 이보다 작으면 이 값으로 올린다 (1 = 0.229 rpm, 공장 출하값 285).
+   app.c 의 MAX_GOAL 이상이어야 최고 속도 명령도 받아들인다 */
+#define MX64_MIN_VELOCITY_LIMIT 285
+
 #define MX64_MODE_VELOCITY 1
 #define MX64_MODE_POSITION 3
 

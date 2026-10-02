@@ -93,6 +93,7 @@ volatile int      g_dxl_reboots;    /* 에러 때문에 재부팅한 횟수 */
 volatile uint16_t g_dxl_volt[2];    /* 모터가 측정한 지금 전압 */
 volatile uint16_t g_dxl_volt_min[2];/* 모터에 설정된 전압 하한 */
 volatile uint16_t g_dxl_volt_max[2];/* 모터에 설정된 전압 상한 */
+volatile uint32_t g_dxl_vel_limit[2]; /* 켜질 때 모터에 설정돼 있던 속도 제한 (285 보다 작으면 285 로 올림) */
 volatile uint8_t  g_dxl_torque[2];  /* 모터 토크 (1 = 켜짐, 0 = 모터가 스스로 끔) */
 volatile uint32_t g_dxl_rx_bytes;   /* 받은 바이트 수 (0 = 배선 문제) */
 volatile uint8_t  g_sw_on;          /* 켜진 스위치 (bit0 = S1 ... bit3 = S4) */
@@ -201,6 +202,11 @@ static int setup_one_motor(int index)
   }
   if (dxl_read(id, MX64_ADDR_MAX_VOLTAGE, 2, buf) >= 0) {
     g_dxl_volt_max[index] = buf[0] | (buf[1] << 8);
+  }
+  uint8_t buf4[4];
+  if (dxl_read(id, MX64_ADDR_VELOCITY_LIMIT, 4, buf4) >= 0) {
+    g_dxl_vel_limit[index] = buf4[0] | (buf4[1] << 8) |
+                             ((uint32_t)buf4[2] << 16) | ((uint32_t)buf4[3] << 24);
   }
 
   /* 1) 바퀴용 설정 (속도 모드 + 토크 ON) */

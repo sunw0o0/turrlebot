@@ -52,6 +52,22 @@ int mx64_set_wheel_mode(uint8_t id)
     }
   }
 
+  /* 2-1) 속도 제한(Velocity Limit) 확인.
+          목표 속도가 이 값보다 크면 모터가 명령을 거부해서 안 돈다.
+          MX64_MIN_VELOCITY_LIMIT 보다 작을 때만 올린다 (EEPROM, 토크 OFF 상태에서만 쓸 수 있음) */
+  uint8_t buf[4];
+  ret = dxl_read(id, MX64_ADDR_VELOCITY_LIMIT, 4, buf);
+  if (mx64_failed(ret)) {
+    return ret;
+  }
+  uint32_t limit = buf[0] | (buf[1] << 8) | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+  if (limit < MX64_MIN_VELOCITY_LIMIT) {
+    ret = dxl_write_u32(id, MX64_ADDR_VELOCITY_LIMIT, MX64_MIN_VELOCITY_LIMIT);
+    if (mx64_failed(ret)) {
+      return ret;
+    }
+  }
+
   /* 3) 토크를 켜자마자 튀어나가지 않도록 속도 0 */
   ret = mx64_set_speed(id, 0);
   if (mx64_failed(ret)) {
