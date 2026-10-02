@@ -60,6 +60,7 @@
 /* ---- 안전 제한 ---- */
 #define MAX_WHEEL_MPS   0.30f      /* 바퀴 선속도 최대 (m/s) */
 #define MAX_GOAL        250        /* MX-64 값 최대 (약 57 rpm) */
+#define TEST_GOAL_MAX   285        /* 디버거 시험(g_test_goal) 최대 = 모터 속도 제한 (약 65 rpm) */
 #define CMD_TIMEOUT_MS  300        /* 이 시간 동안 ROS 명령이 없으면 정지 */
 
 #define STATUS_PERIOD_MS 100       /* 젯슨에 상태 보고하는 주기 */
@@ -103,6 +104,12 @@ volatile int16_t  g_cmd_left_mm;    /* 받은 왼쪽 바퀴 속도 (mm/s) */
 volatile int16_t  g_cmd_right_mm;   /* 받은 오른쪽 바퀴 속도 (mm/s) */
 volatile int32_t  g_goal[2];        /* 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 */
 volatile int32_t  g_present_vel[2]; /* 모터가 엔코더로 잰 실제 속도 (g_goal 과 같은 단위/방향, 1 = 0.229 rpm) */
+volatile float    g_goal_rpm[2];    /* g_goal 을 rpm 으로 */
+volatile float    g_present_rpm[2]; /* g_present_vel 을 rpm 으로 */
+/* 디버거 속도 시험: Live Expressions 에서 이 값을 바꾸면 (0 이 아니면)
+   젯슨 명령 대신 두 바퀴를 이 값으로 돌린다. 1 = 0.229 rpm, 최대 TEST_GOAL_MAX.
+   S1 켜짐 + S2 꺼짐 일 때만 동작. 끝나면 0 으로 되돌린다. */
+volatile int32_t  g_test_goal;
 volatile uint8_t  g_state;          /* PROTO_STATE_* (proto.h) */
 
 
@@ -327,6 +334,7 @@ static void read_present_velocity(void)
       int32_t v = (int32_t)(buf[0] | (buf[1] << 8) |
                             ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24));
       g_present_vel[i] = dir[i] * v;
+      g_present_rpm[i] = g_present_vel[i] * 0.229f;
     }
   }
 }
@@ -504,6 +512,18 @@ static uint8_t decide(uint8_t on, uint32_t now, int32_t *left, int32_t *right)
   if (!(on & SW1)) {
     return PROTO_STATE_STOP_SW;
   }
+  if (g_test_goal != 0) {
+    int32_t goal = g_test_goal;
+    if (goal > TEST_GOAL_MAX) {
+      goal = TEST_GOAL_MAX;
+    }
+    if (goal < -TEST_GOAL_MAX) {
+      goal = -TEST_GOAL_MAX;
+    }
+    *left = goal;
+    *right = goal;
+    return PROTO_STATE_MANUAL;   /* 디버거 시험 중 */
+  }
   if (has_cmd && (now - last_cmd_tick) < CMD_TIMEOUT_MS) {
     wheels_to_goals(g_cmd_left_mm, g_cmd_right_mm, left, right);
     return PROTO_STATE_ROS;
@@ -593,6 +613,8 @@ void app_loop(void)
     g_state = decide(g_sw_on, now, &left, &right);
     g_goal[0] = left;
     g_goal[1] = right;
+    g_goal_rpm[0] = left * 0.229f;
+    g_goal_rpm[1] = right * 0.229f;
 
     int32_t speeds[2];
     speeds[0] = LEFT_DIR * left;       /* 왼쪽 */

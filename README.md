@@ -145,6 +145,8 @@ ROS 없이 키보드 테스트: `python3 teleop_test.py /dev/ttyUSB0` (`stm32_li
 |---|---|
 | `g_state` | 위 표의 상태 |
 | `g_cmd_left_mm`, `g_cmd_right_mm` | 마지막으로 받은 왼쪽/오른쪽 바퀴 속도 (mm/s) |
+| `g_test_goal` | **디버거 속도 시험**: Live Expressions 에서 값을 넣으면 (0 이 아니면) 두 바퀴를 그 값으로 돌림 (1 = 0.229 rpm, 최대 285). S1 켜짐 + S2 꺼짐일 때만. 끝나면 0 |
+| `g_goal_rpm`, `g_present_rpm` | 목표 / 실제 속도 [rpm] |
 | `g_present_vel` | 모터가 엔코더로 잰 실제 속도 ([0] 왼쪽, [1] 오른쪽, g_goal 과 같은 단위/방향, 0.1초마다) |
 | `g_goal` | 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 (방향 부호 곱하기 전) |
 | `g_proto_ok`, `g_proto_bad` | 제대로 받은 패킷 수, 깨진 패킷 수 |
