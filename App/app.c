@@ -90,6 +90,7 @@ volatile int      g_dxl_count;      /* 찾은 모터 수 */
 volatile uint8_t  g_dxl_ids[2];     /* [0] 왼쪽, [1] 오른쪽 모터 ID */
 volatile int      g_dxl_err;        /* 설정 실패 이유 (-2 = 응답 없음) */
 volatile uint8_t  g_dxl_hw_err[2];  /* 모터에 걸려 있던 하드웨어 에러 */
+volatile uint8_t  g_dxl_last_hw_err[2]; /* 0 이 아니었던 마지막 하드웨어 에러 (재부팅으로 지워져도 남음) */
 volatile int      g_dxl_reboots;    /* 에러 때문에 재부팅한 횟수 */
 /* 전압 (0.1V 단위, 예: 120 = 12.0V). 에러 1(입력 전압 이상) 확인용 */
 volatile uint16_t g_dxl_volt[2];    /* 모터가 측정한 지금 전압 */
@@ -231,6 +232,9 @@ static int setup_one_motor(int index)
   if (ret & DXL_ALERT) {
     if (dxl_read(id, MX64_ADDR_HARDWARE_ERROR, 1, &hw_error) >= 0) {
       g_dxl_hw_err[index] = hw_error;
+      if (hw_error != 0) {
+        g_dxl_last_hw_err[index] = hw_error;
+      }
     }
     if (torque_is_on(id)) {
       return 0;                  /* 경고는 있지만 움직일 수 있음 */
@@ -309,6 +313,9 @@ static int check_motors(void)
     }
     if (dxl_read(ids[i], MX64_ADDR_HARDWARE_ERROR, 1, &value) >= 0) {
       g_dxl_hw_err[i] = value;
+      if (value != 0) {
+        g_dxl_last_hw_err[i] = value;
+      }
     }
     if (dxl_read(ids[i], MX64_ADDR_TORQUE_ENABLE, 1, &value) >= 0) {
       g_dxl_torque[i] = value;
