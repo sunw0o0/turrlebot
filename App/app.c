@@ -51,7 +51,7 @@
 /* 어느 모터가 왼쪽인지. 1 = ID 가 작은 모터가 왼쪽, 0 = ID 가 큰 모터가 왼쪽.
    teleop 에서 j(왼쪽 회전)를 눌렀는데 오른쪽으로 돌면서 i 는 앞으로 가면
    이 값을 바꾸고 LEFT_DIR / RIGHT_DIR 부호도 서로 바꾼다. */
-#define LEFT_IS_SMALLER_ID 1
+#define LEFT_IS_SMALLER_ID 0   /* 로봇 앞쪽 기준: 왼쪽 바퀴 = ID 2, 오른쪽 바퀴 = ID 1 */
 
 /* ---- 로봇 치수 (임시값! 실제 로봇에 맞게 바꾸기) ---- */
 #define WHEEL_RADIUS_M     0.05f   /* 바퀴 반지름 r (m) */

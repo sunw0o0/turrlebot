@@ -51,7 +51,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 
 - 펌웨어 MX-64(2.0), Protocol 2.0. 통신 속도와 ID는 코드가 자동으로 찾는다.
   - 1M, 57600, 115200, 2M, 9600bps 순서로 broadcast ping을 보내 처음 응답한 속도를 쓴다.
-  - 찾은 ID 중 작은 쪽이 왼쪽 바퀴다 (`app.c` 의 `LEFT_IS_SMALLER_ID` 로 바꿀 수 있음). 두 모터의 ID는 서로 달라야 한다.
+  - 지금 로봇은 ID 가 큰 쪽(ID 2)이 왼쪽 바퀴다 (`app.c` 의 `LEFT_IS_SMALLER_ID` = 0). 두 모터의 ID는 서로 달라야 한다.
 - 속도 모드(Operating Mode = 1)는 `app_init()`에서 자동으로 설정한다 (EEPROM은 값이 다를 때만 쓴다).
 
 ## 동작 확인 (디버거 Expressions)
