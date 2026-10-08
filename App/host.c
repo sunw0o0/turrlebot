@@ -26,7 +26,8 @@ void host_init(void)
   rx_head = 0;
   rx_tail = 0;
 
-  if (!LL_USART_IsEnabled(HOST_USART)) {
+  if (!LL_USART_IsEnabled(HOST_USART))
+  {
     LL_USART_Enable(HOST_USART);
   }
   /* "바이트를 받으면 인터럽트를 걸어라" 켜기.
@@ -45,15 +46,18 @@ void host_init(void)
 void host_irq(void)
 {
   /* 오버런(너무 빨리 들어와 놓침)이 있으면 지운다. 안 지우면 수신이 멈춘다 */
-  if (LL_USART_IsActiveFlag_ORE(HOST_USART)) {
+  if (LL_USART_IsActiveFlag_ORE(HOST_USART))
+  {
     LL_USART_ClearFlag_ORE(HOST_USART);
   }
 
-  if (LL_USART_IsActiveFlag_RXNE(HOST_USART)) {
+  if (LL_USART_IsActiveFlag_RXNE(HOST_USART))
+  {
     uint8_t b = LL_USART_ReceiveData8(HOST_USART);
     uint16_t next = (uint16_t)(rx_head + 1);
 
-    if ((uint16_t)(next - rx_tail) > RX_BUF_SIZE) {
+    if ((uint16_t)(next - rx_tail) > RX_BUF_SIZE)
+    {
       g_host_overflow++;            /* 버퍼가 꽉 참: 이 바이트는 버린다 */
       return;
     }
@@ -65,7 +69,8 @@ void host_irq(void)
 
 int host_read(uint8_t *byte)
 {
-  if (rx_tail == rx_head) {
+  if (rx_tail == rx_head)
+  {
     return 0;                       /* 받은 게 없음 */
   }
   *byte = rx_buf[rx_tail % RX_BUF_SIZE];
@@ -75,8 +80,10 @@ int host_read(uint8_t *byte)
 
 void host_write(const uint8_t *data, uint16_t len)
 {
-  for (uint16_t i = 0; i < len; i++) {
-    while (!LL_USART_IsActiveFlag_TXE(HOST_USART)) {
+  for (uint16_t i = 0; i < len; i++)
+  {
+    while (!LL_USART_IsActiveFlag_TXE(HOST_USART))
+    {
     }
     LL_USART_TransmitData8(HOST_USART, data[i]);
     g_host_tx_bytes++;

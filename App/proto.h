@@ -73,7 +73,8 @@
 #define PROTO_STATE_MANUAL      5   /* 스위치 고정 속도 테스트 */
 
 /* 받은 패킷 하나 */
-typedef struct {
+typedef struct
+{
   uint8_t cmd;
   uint8_t len;
   uint8_t data[PROTO_MAX_DATA];

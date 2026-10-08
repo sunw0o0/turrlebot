@@ -32,16 +32,20 @@ uint8_t sw_on(void)
 {
   uint8_t on = 0;
 
-  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == SW_ON_LEVEL) {
+  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == SW_ON_LEVEL)
+  {
     on |= SW1;
   }
-  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_13) == SW_ON_LEVEL) {
+  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_13) == SW_ON_LEVEL)
+  {
     on |= SW2;
   }
-  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14) == SW_ON_LEVEL) {
+  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14) == SW_ON_LEVEL)
+  {
     on |= SW3;
   }
-  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_15) == SW_ON_LEVEL) {
+  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_15) == SW_ON_LEVEL)
+  {
     on |= SW4;
   }
   return on;

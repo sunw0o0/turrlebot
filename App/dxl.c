@@ -65,15 +65,24 @@ static uint8_t tx_pkt[PKT_MAX];         /* 보낼 패킷을 만드는 곳 */
 static int time_is_over(uint32_t deadline)
 {
   /* 뺄셈 결과를 부호 있는 수로 보면 tick 값이 넘쳐 0 으로 돌아가도 안전하다 */
-  if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
+  if ((int32_t)(HAL_GetTick() - deadline) >= 0)
+  {
     return 1;
   }
   return 0;
 }
 
-/* 16비트 숫자의 아래 8비트 / 위 8비트 */
-static uint8_t low_byte(uint16_t value)  { return (uint8_t)(value & 0xFF); }
-static uint8_t high_byte(uint16_t value) { return (uint8_t)(value >> 8); }
+/* 16비트 값의 아래 8비트 (작은 자리) */
+static uint8_t low_byte(uint16_t value)
+{
+  return (uint8_t)(value & 0xFF);
+}
+
+/* 16비트 값의 위 8비트 (큰 자리) */
+static uint8_t high_byte(uint16_t value)
+{
+  return (uint8_t)(value >> 8);
+}
 
 
 /* ======================================================================
@@ -85,13 +94,18 @@ uint16_t dxl_crc(const uint8_t *data, uint16_t len)
 {
   uint16_t crc = 0;
 
-  for (uint16_t i = 0; i < len; i++) {
+  for (uint16_t i = 0; i < len; i++)
+  {
     crc = crc ^ ((uint16_t)data[i] << 8);
 
-    for (int bit = 0; bit < 8; bit++) {
-      if (crc & 0x8000) {
+    for (int bit = 0; bit < 8; bit++)
+    {
+      if (crc & 0x8000)
+      {
         crc = (uint16_t)((crc << 1) ^ 0x8005);
-      } else {
+      }
+      else
+      {
         crc = (uint16_t)(crc << 1);
       }
     }
@@ -109,12 +123,14 @@ static void rx_poll(void)
 {
   /* 오버런 에러(너무 늦게 읽어서 바이트를 놓침)가 있으면 지운다.
      지우지 않으면 USART 가 더 이상 받지 않는다. */
-  if (LL_USART_IsActiveFlag_ORE(dxl_usart)) {
+  if (LL_USART_IsActiveFlag_ORE(dxl_usart))
+  {
     LL_USART_ClearFlag_ORE(dxl_usart);
   }
 
   /* RXNE = "받은 바이트가 있음" */
-  if (LL_USART_IsActiveFlag_RXNE(dxl_usart)) {
+  if (LL_USART_IsActiveFlag_RXNE(dxl_usart))
+  {
     rx_buf[rx_head % RX_BUF_SIZE] = LL_USART_ReceiveData8(dxl_usart);
     rx_head++;
     dxl_rx_count++;
@@ -124,10 +140,12 @@ static void rx_poll(void)
 /* 이전에 받아둔 바이트를 모두 버린다 (새 명령을 보내기 직전에 호출) */
 static void rx_flush(void)
 {
-  while (LL_USART_IsActiveFlag_RXNE(dxl_usart)) {
+  while (LL_USART_IsActiveFlag_RXNE(dxl_usart))
+  {
     LL_USART_ReceiveData8(dxl_usart);
   }
-  if (LL_USART_IsActiveFlag_ORE(dxl_usart)) {
+  if (LL_USART_IsActiveFlag_ORE(dxl_usart))
+  {
     LL_USART_ClearFlag_ORE(dxl_usart);
   }
   rx_tail = rx_head;
@@ -140,9 +158,11 @@ static void rx_flush(void)
  */
 static int rx_get(uint8_t *byte, uint32_t deadline)
 {
-  while (rx_tail == rx_head) {          /* 버퍼가 비어 있는 동안 */
+  while (rx_tail == rx_head) /* 버퍼가 비어 있는 동안 */
+  {
     rx_poll();
-    if (rx_tail == rx_head && time_is_over(deadline)) {
+    if (rx_tail == rx_head && time_is_over(deadline))
+    {
       return 0;
     }
   }
@@ -162,11 +182,14 @@ static int tx_bytes(const uint8_t *data, uint16_t len)
 {
   uint32_t deadline = HAL_GetTick() + TX_TIMEOUT_MS + 1;
 
-  for (uint16_t i = 0; i < len; i++) {
+  for (uint16_t i = 0; i < len; i++)
+  {
     /* TXE = "송신 레지스터가 비었음, 다음 바이트 넣어도 됨" */
-    while (!LL_USART_IsActiveFlag_TXE(dxl_usart)) {
+    while (!LL_USART_IsActiveFlag_TXE(dxl_usart))
+    {
       rx_poll();                        /* 보내는 동안 돌아오는 에코도 받아둔다 */
-      if (time_is_over(deadline)) {
+      if (time_is_over(deadline))
+      {
         return DXL_ERR_TX;
       }
     }
@@ -175,9 +198,11 @@ static int tx_bytes(const uint8_t *data, uint16_t len)
   }
 
   /* TC = "마지막 바이트까지 선으로 다 나갔음" */
-  while (!LL_USART_IsActiveFlag_TC(dxl_usart)) {
+  while (!LL_USART_IsActiveFlag_TC(dxl_usart))
+  {
     rx_poll();
-    if (time_is_over(deadline)) {
+    if (time_is_over(deadline))
+    {
       return DXL_ERR_TX;
     }
   }
@@ -206,8 +231,10 @@ static int send_packet(uint8_t id, uint8_t inst, const uint8_t *params,
   n = 8;
 
   /* 데이터 복사 */
-  for (uint16_t i = 0; i < nparams; i++) {
-    if (n + 3 > PKT_MAX) {
+  for (uint16_t i = 0; i < nparams; i++)
+  {
+    if (n + 3 > PKT_MAX)
+    {
       return DXL_ERR_ARG;
     }
     tx_pkt[n] = params[i];
@@ -217,7 +244,8 @@ static int send_packet(uint8_t id, uint8_t inst, const uint8_t *params,
      * 바이트 스터핑: 데이터 중간에 FF FF FD 가 나오면 모터가 헤더로
      * 착각하므로 뒤에 FD 를 하나 더 넣는다. (받는 쪽에서 다시 뺀다)
      */
-    if (tx_pkt[n - 3] == 0xFF && tx_pkt[n - 2] == 0xFF && tx_pkt[n - 1] == 0xFD) {
+    if (tx_pkt[n - 3] == 0xFF && tx_pkt[n - 2] == 0xFF && tx_pkt[n - 1] == 0xFD)
+    {
       tx_pkt[n] = 0xFD;
       n++;
     }
@@ -251,17 +279,26 @@ static int wait_for_header(uint32_t deadline)
   uint8_t b;
   int matched = 0;              /* 헤더를 몇 바이트째까지 맞췄는지 */
 
-  while (matched < 4) {
-    if (!rx_get(&b, deadline)) {
+  while (matched < 4)
+  {
+    if (!rx_get(&b, deadline))
+    {
       return 0;
     }
-    if (b == header[matched]) {
+    if (b == header[matched])
+    {
       matched++;
-    } else if (b == 0xFF && matched == 2) {
+    }
+    else if (b == 0xFF && matched == 2)
+    {
       /* FF FF FF: 마지막 두 개가 FF FF 이므로 그대로 2 */
-    } else if (b == 0xFF) {
+    }
+    else if (b == 0xFF)
+    {
       matched = 1;              /* FF FF FD FF: 마지막 FF 부터 다시 시작 */
-    } else {
+    }
+    else
+    {
       matched = 0;              /* 틀리면 처음부터 다시 */
     }
   }
@@ -280,9 +317,11 @@ static int recv_any(uint32_t deadline, uint8_t *id, uint8_t *params,
 {
   uint8_t pkt[PKT_MAX];
 
-  while (1) {
+  while (1)
+  {
     /* (1) 헤더 찾기 */
-    if (!wait_for_header(deadline)) {
+    if (!wait_for_header(deadline))
+    {
       return DXL_ERR_TIMEOUT;
     }
     pkt[0] = 0xFF;
@@ -291,19 +330,24 @@ static int recv_any(uint32_t deadline, uint8_t *id, uint8_t *params,
     pkt[3] = 0x00;
 
     /* (2) ID, 길이 2바이트 */
-    for (int i = 4; i < 7; i++) {
-      if (!rx_get(&pkt[i], deadline)) {
+    for (int i = 4; i < 7; i++)
+    {
+      if (!rx_get(&pkt[i], deadline))
+      {
         return DXL_ERR_TIMEOUT;
       }
     }
     uint16_t len = pkt[5] | (pkt[6] << 8);
-    if (len < 4 || len + 7 > PKT_MAX) {
+    if (len < 4 || len + 7 > PKT_MAX)
+    {
       continue;                 /* 말이 안 되는 길이 -> 버리고 다음 패킷 */
     }
 
     /* (3) 나머지 (명령, 에러, 데이터, CRC) */
-    for (uint16_t i = 0; i < len; i++) {
-      if (!rx_get(&pkt[7 + i], deadline)) {
+    for (uint16_t i = 0; i < len; i++)
+    {
+      if (!rx_get(&pkt[7 + i], deadline))
+      {
         return DXL_ERR_TIMEOUT;
       }
     }
@@ -311,29 +355,35 @@ static int recv_any(uint32_t deadline, uint8_t *id, uint8_t *params,
 
     /* (4) CRC 검사. 틀리면 깨진 패킷이니 버린다 */
     uint16_t crc = pkt[total - 2] | (pkt[total - 1] << 8);
-    if (crc != dxl_crc(pkt, total - 2)) {
+    if (crc != dxl_crc(pkt, total - 2))
+    {
       continue;
     }
 
     /* (5) 응답(0x55)이 아니면 우리가 보낸 패킷의 에코다 -> 버린다 */
-    if (pkt[7] != INST_STATUS) {
+    if (pkt[7] != INST_STATUS)
+    {
       continue;
     }
 
     /* (6) 데이터 꺼내기 (9번부터 CRC 앞까지). 스터핑된 FD 는 뺀다 */
     uint16_t out = 0;
-    for (uint16_t i = 9; i < total - 2; i++) {
+    for (uint16_t i = 9; i < total - 2; i++)
+    {
       int is_stuffed = (pkt[i] == 0xFD && pkt[i - 1] == 0xFD &&
                         pkt[i - 2] == 0xFF && pkt[i - 3] == 0xFF);
-      if (is_stuffed) {
+      if (is_stuffed)
+      {
         continue;
       }
-      if (out < nparams) {
+      if (out < nparams)
+      {
         params[out] = pkt[i];
       }
       out++;
     }
-    if (out < nparams) {
+    if (out < nparams)
+    {
       continue;                 /* 원한 만큼 데이터가 없으면 버린다 */
     }
 
@@ -349,12 +399,15 @@ static int recv_status(uint8_t id, uint8_t *params, uint16_t nparams)
   uint8_t who;
   int ret;
 
-  while (1) {
+  while (1)
+  {
     ret = recv_any(deadline, &who, params, nparams);
-    if (ret < 0) {
+    if (ret < 0)
+    {
       return ret;               /* 시간 초과 */
     }
-    if (who == id) {
+    if (who == id)
+    {
       return ret;               /* 원하던 모터의 응답 */
     }
     /* 다른 모터의 응답이면 무시하고 계속 기다린다 */
@@ -371,7 +424,8 @@ void dxl_init(USART_TypeDef *usart)
   dxl_usart = usart;
   rx_head = 0;
   rx_tail = 0;
-  if (!LL_USART_IsEnabled(usart)) {
+  if (!LL_USART_IsEnabled(usart))
+  {
     LL_USART_Enable(usart);
   }
   rx_flush();
@@ -380,7 +434,8 @@ void dxl_init(USART_TypeDef *usart)
 void dxl_set_baud(uint32_t baud)
 {
   /* 보내던 게 다 나갈 때까지 기다린 뒤 속도를 바꾼다 */
-  while (!LL_USART_IsActiveFlag_TC(dxl_usart)) {
+  while (!LL_USART_IsActiveFlag_TC(dxl_usart))
+  {
   }
   LL_USART_Disable(dxl_usart);
   LL_USART_SetBaudRate(dxl_usart, HAL_RCC_GetPCLK1Freq(),
@@ -397,7 +452,8 @@ int dxl_ping(uint8_t id)
 {
   uint8_t info[3];              /* 응답: 모델 번호 2바이트 + 펌웨어 버전 1바이트 */
   int ret = send_packet(id, INST_PING, NULL, 0);
-  if (ret != DXL_OK) {
+  if (ret != DXL_OK)
+  {
     return ret;
   }
   return recv_status(id, info, 3);
@@ -410,19 +466,23 @@ int dxl_scan(uint8_t *ids, int max)
   int count = 0;
 
   /* broadcast ping: 모든 모터가 자기 ID 순서대로 조금씩 늦게 응답한다 */
-  if (send_packet(DXL_BROADCAST_ID, INST_PING, NULL, 0) != DXL_OK) {
+  if (send_packet(DXL_BROADCAST_ID, INST_PING, NULL, 0) != DXL_OK)
+  {
     return 0;
   }
 
   uint32_t deadline = HAL_GetTick() + 3 * status_timeout_ms + 10;
-  while (recv_any(deadline, &id, info, 3) >= 0) {
-    if (count < max) {
+  while (recv_any(deadline, &id, info, 3) >= 0)
+  {
+    if (count < max)
+    {
       ids[count] = id;
     }
     count++;
   }
 
-  if (count > max) {
+  if (count > max)
+  {
     return max;
   }
   return count;
@@ -431,7 +491,8 @@ int dxl_scan(uint8_t *ids, int max)
 int dxl_reboot(uint8_t id)
 {
   int ret = send_packet(id, INST_REBOOT, NULL, 0);
-  if (ret != DXL_OK) {
+  if (ret != DXL_OK)
+  {
     return ret;
   }
   return recv_status(id, NULL, 0);
@@ -446,11 +507,13 @@ int dxl_read(uint8_t id, uint16_t addr, uint16_t len, uint8_t *out)
   params[2] = low_byte(len);
   params[3] = high_byte(len);
 
-  if (len + 11 > PKT_MAX) {
+  if (len + 11 > PKT_MAX)
+  {
     return DXL_ERR_ARG;
   }
   int ret = send_packet(id, INST_READ, params, 4);
-  if (ret != DXL_OK) {
+  if (ret != DXL_OK)
+  {
     return ret;
   }
   return recv_status(id, out, len);
@@ -461,7 +524,8 @@ int dxl_write(uint8_t id, uint16_t addr, const uint8_t *data, uint16_t len)
   /* 쓰기 명령 데이터: 주소 2바이트 + 쓸 값들 */
   uint8_t params[PKT_MAX];
 
-  if (len + 2 > PKT_MAX - 12) {
+  if (len + 2 > PKT_MAX - 12)
+  {
     return DXL_ERR_ARG;
   }
   params[0] = low_byte(addr);
@@ -469,10 +533,12 @@ int dxl_write(uint8_t id, uint16_t addr, const uint8_t *data, uint16_t len)
   memcpy(&params[2], data, len);
 
   int ret = send_packet(id, INST_WRITE, params, len + 2);
-  if (ret != DXL_OK) {
+  if (ret != DXL_OK)
+  {
     return ret;
   }
-  if (id == DXL_BROADCAST_ID) {
+  if (id == DXL_BROADCAST_ID)
+  {
     return ret;                 /* broadcast 는 응답이 없다 */
   }
   return recv_status(id, NULL, 0);
@@ -504,7 +570,8 @@ int dxl_sync_write(uint16_t addr, uint16_t len, const uint8_t *ids,
   uint8_t params[PKT_MAX];
   uint16_t n = 0;
 
-  if (4 + count * (len + 1) > PKT_MAX - 12) {
+  if (4 + count * (len + 1) > PKT_MAX - 12)
+  {
     return DXL_ERR_ARG;
   }
   params[0] = low_byte(addr);
@@ -513,7 +580,8 @@ int dxl_sync_write(uint16_t addr, uint16_t len, const uint8_t *ids,
   params[3] = high_byte(len);
   n = 4;
 
-  for (uint8_t i = 0; i < count; i++) {
+  for (uint8_t i = 0; i < count; i++)
+  {
     params[n] = ids[i];
     n++;
     memcpy(&params[n], &data[i * len], len);

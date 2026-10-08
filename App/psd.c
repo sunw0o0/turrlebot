@@ -31,14 +31,17 @@ static int started;
  */
 static uint16_t volt_to_mm(float volt)
 {
-  if (volt < 0.3f) {
+  if (volt < 0.3f)
+  {
     return MAX_MM;              /* 너무 낮음 = 아무것도 없음 (멀다) */
   }
   float mm = 299.88f * powf(volt, -1.173f);
-  if (mm < MIN_MM) {
+  if (mm < MIN_MM)
+  {
     mm = MIN_MM;
   }
-  if (mm > MAX_MM) {
+  if (mm > MAX_MM)
+  {
     mm = MAX_MM;
   }
   return (uint16_t)mm;
@@ -47,18 +50,21 @@ static uint16_t volt_to_mm(float volt)
 void psd_init(void)
 {
   /* 4채널을 한 번 스캔하면 DMA 가 adc_buf[0..3] 에 넣고, 처음 자리로 돌아간다 (순환) */
-  if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_buf, ADC_CHANNELS) == HAL_OK) {
+  if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_buf, ADC_CHANNELS) == HAL_OK)
+  {
     started = 1;
   }
 }
 
 void psd_update(void)
 {
-  if (!started) {
+  if (!started)
+  {
     return;
   }
 
-  for (int i = 0; i < PSD_COUNT; i++) {
+  for (int i = 0; i < PSD_COUNT; i++)
+  {
     float raw = (float)(adc_buf[i] & 0x0FFF);
     filtered[i] += FILTER_ALPHA * (raw - filtered[i]);
 

@@ -42,6 +42,17 @@ app_loop();
 
 STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Properties > C/C++ General > Paths and Symbols > Source Location), Include paths에도 `App`을 추가한다.
 
+## 코드 공부 순서 (처음 보는 사람용)
+
+모든 `{` 는 새 줄에 있고, 한 함수는 한 가지 일만 하도록 잘게 나눠 두었다.
+
+1. `App/app.c` 맨 아래 **`app_loop()`** : 로봇이 계속 반복하는 일 목록 (10줄 정도)
+2. 그 위의 **`task_...()`** 함수들 : "시간이 됐으면 한 번 일하기" 모양이 반복된다
+3. **`decide()`** : 스위치 / 젯슨 명령을 보고 어떻게 움직일지 정하기
+4. **`send_status()`, `send_psd()`, `send_encoder()`** : 젯슨에 보낼 패킷 만들기 (`put_16`, `put_32` 로 숫자를 바이트로 쪼갬)
+5. **`find_motors()`, `setup_one_motor()`** : 모터 찾고 설정하기
+6. 더 아래 단계가 궁금하면 `mx64.c` (모터 설정 순서) -> `dxl.c` (다이나믹셀 패킷, CRC) -> `proto.c` (젯슨 패킷 조립)
+
 ## CubeMX 설정
 
 - USART3: Asynchronous, 1 Mbps, 8N1, **TX = PC10**, RX = PC11 (PB10은 LED4)
