@@ -25,6 +25,14 @@
  *     DATA[2..3] : 앞   거리 uint16 [mm]
  *     DATA[4..5] : 오른쪽 거리 uint16 [mm]
  *
+ *   CMD 0x11  엔코더 (LEN = 12), 0.05초마다 (모터 준비됐을 때만)
+ *     DATA[0..3]   : 왼쪽 바퀴 위치 int32 (4096 = 1바퀴, 앞으로 가면 커짐, 여러 바퀴 누적)
+ *     DATA[4..7]   : 오른쪽 바퀴 위치 int32
+ *     DATA[8..9]   : 왼쪽 바퀴 속도 int16 (1 = 0.229 rpm, 앞으로 = +)
+ *     DATA[10..11] : 오른쪽 바퀴 속도 int16
+ *     * 모터가 재부팅되면 위치가 0~4095 근처로 다시 시작한다.
+ *       젯슨은 "이전 값과의 차이" 로 거리를 계산하고, 너무 큰 점프는 버린다.
+ *
  *   CMD 0x81  상태 (LEN = 19), 0.1초마다
  *     DATA[0] : 모터 준비 (1 = 준비됨)
  *     DATA[1] : 상태 (PROTO_STATE_*)
@@ -49,10 +57,12 @@
 
 #define PROTO_CMD_WHEEL  0x01
 #define PROTO_CMD_PSD    0x10
+#define PROTO_CMD_ENCODER 0x11
 #define PROTO_CMD_STATUS 0x81
 
 #define PROTO_MAX_DATA 16
 #define PROTO_STATUS_LEN 19
+#define PROTO_ENCODER_LEN 12
 
 /* 상태 값 */
 #define PROTO_STATE_STOP_SW     0   /* S1 꺼짐 -> 정지 */

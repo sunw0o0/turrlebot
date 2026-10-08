@@ -26,6 +26,7 @@
 #define MX64_ADDR_HARDWARE_ERROR   70   /* 하드웨어 에러 상태 (읽기 전용) */
 #define MX64_ADDR_GOAL_VELOCITY    104  /* 목표 속도, 4바이트, 음수 = 반대 방향 */
 #define MX64_ADDR_PRESENT_VELOCITY 128  /* 현재 속도, 4바이트 */
+#define MX64_ADDR_PRESENT_POSITION 132  /* 현재 위치(엔코더), 4바이트, 4096 = 1바퀴 */
 #define MX64_ADDR_PRESENT_VOLTAGE  144  /* 지금 들어오는 전압, 2바이트 (0.1V 단위) */
 
 /* Operating Mode 값 */

@@ -95,7 +95,15 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 [AA] [55] [01] [04] [왼쪽 mm/s int16] [오른쪽 mm/s int16] [CHK]     젯슨 -> STM32
 [AA] [55] [81] [13] [준비, 상태, 스위치, 에러0, 에러1, 전압 uint16, 모터 수, ID왼, ID오, 토크 비트, 목표속도 왼/오 int16, 실제속도 왼/오 int16] [CHK]   STM32 -> 젯슨 (0.1초마다)
 [AA] [55] [10] [06] [왼쪽 mm, 앞 mm, 오른쪽 mm  uint16] [CHK]   STM32 -> 젯슨 (0.05초마다, 팀 stm_bridge 가 /psd 로 발행)
+[AA] [55] [11] [0C] [위치 왼/오 int32, 속도 왼/오 int16] [CHK]   STM32 -> 젯슨 (0.05초마다, 모터 준비됐을 때만)
 ```
+
+엔코더 패킷 (0x11):
+- 위치 = MX-64 Present Position(132번). 4096 = 바퀴 1바퀴, 여러 바퀴 누적, **앞으로 가면 커진다** (`LEFT_DIR`/`RIGHT_DIR` 곱함)
+- 속도 = Present Velocity(128번), 1 = 0.229 rpm, 앞으로 = +
+- 128~135번을 한 번에 8바이트 읽는다
+- 모터가 재부팅되면 위치가 0~4095 근처로 다시 시작한다 -> 젯슨은 **이전 값과의 차이**로 거리를 구하고 큰 점프는 버린다
+- 굴러간 거리 [m] = 차이 / 4096 × 2π × 바퀴 반지름 (`stm32_link.py` 의 `wheel_dist`)
 
 - `cmd_vel`(v, w) -> 바퀴 속도 변환은 **젯슨**에서 한다: 왼쪽 = v - w·L/2, 오른쪽 = v + w·L/2 (L = `wheel_separation`, 팀 `stm_bridge.yaml`)
 - STM32 는 바퀴 선속도(m/s) / r -> rad/s -> rpm -> ÷ 0.229 로 MX-64 값을 만든다
@@ -148,7 +156,8 @@ ROS 없이 키보드 테스트: `python3 teleop_test.py /dev/ttyUSB0` (`stm32_li
 | `g_cmd_left_mm`, `g_cmd_right_mm` | 마지막으로 받은 왼쪽/오른쪽 바퀴 속도 (mm/s) |
 | `g_test_goal` | **디버거 속도 시험**: Live Expressions 에서 값을 넣으면 (0 이 아니면) 두 바퀴를 그 값으로 돌림 (1 = 0.229 rpm, 최대 285). S1 켜짐 + S2 꺼짐일 때만. 끝나면 0 |
 | `g_goal_rpm`, `g_present_rpm` | 목표 / 실제 속도 [rpm] |
-| `g_present_vel` | 모터가 엔코더로 잰 실제 속도 ([0] 왼쪽, [1] 오른쪽, g_goal 과 같은 단위/방향, 0.1초마다) |
+| `g_present_vel` | 모터가 엔코더로 잰 실제 속도 ([0] 왼쪽, [1] 오른쪽, g_goal 과 같은 단위/방향, 0.05초마다) |
+| `g_present_pos` | 모터 엔코더 위치 ([0] 왼쪽, [1] 오른쪽, 4096 = 1바퀴, 앞으로 가면 커짐) |
 | `g_goal` | 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 (방향 부호 곱하기 전) |
 | `g_proto_ok`, `g_proto_bad` | 제대로 받은 패킷 수, 깨진 패킷 수 |
 | `g_sw_on`, `g_speed` | 켜진 스위치 (bit0=S1 ... bit3=S4), 스위치 테스트 속도 |

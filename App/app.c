@@ -67,7 +67,7 @@
 #define UPDATE_PERIOD_MS 50        /* 속도 명령 보내는 주기 */
 #define RETRY_PERIOD_MS  500     /* 모터를 못 찾았을 때 다시 찾는 주기 */
 #define CHECK_PERIOD_MS  1000      /* 모터 전압 / 에러 / 토크를 다시 읽는 주기 */
-#define VEL_PERIOD_MS    100       /* 모터 실제 속도를 읽는 주기 */
+#define VEL_PERIOD_MS    50        /* 모터 실제 속도 / 위치(엔코더)를 읽고 젯슨에 보내는 주기 */
 #define PSD_PERIOD_MS    10        /* PSD 측정 주기 */
 #define PSD_SEND_MS      50        /* 젯슨에 PSD 보내는 주기 */
 
@@ -105,6 +105,7 @@ volatile int16_t  g_cmd_left_mm;    /* 받은 왼쪽 바퀴 속도 (mm/s) */
 volatile int16_t  g_cmd_right_mm;   /* 받은 오른쪽 바퀴 속도 (mm/s) */
 volatile int32_t  g_goal[2];        /* 모터에 보내는 값 [0] 왼쪽, [1] 오른쪽 */
 volatile int32_t  g_present_vel[2]; /* 모터가 엔코더로 잰 실제 속도 (g_goal 과 같은 단위/방향, 1 = 0.229 rpm) */
+volatile int32_t  g_present_pos[2]; /* 모터 엔코더 위치 (4096 = 바퀴 1바퀴, 앞으로 가면 커짐, 여러 바퀴 누적) */
 volatile float    g_goal_rpm[2];    /* g_goal 을 rpm 으로 */
 volatile float    g_present_rpm[2]; /* g_present_vel 을 rpm 으로 */
 /* 디버거 속도 시험: Live Expressions 에서 이 값을 바꾸면 (0 이 아니면)
@@ -121,7 +122,7 @@ static int      count;              /* 찾은 모터 수 */
 static uint32_t last_tick;          /* 마지막으로 일한 시각 (ms) */
 static uint32_t last_status_tick;   /* 마지막으로 상태를 보고한 시각 */
 static uint32_t last_check_tick;    /* 마지막으로 모터 상태를 읽은 시각 */
-static uint32_t last_vel_tick;      /* 마지막으로 실제 속도를 읽은 시각 */
+static uint32_t last_vel_tick;      /* 마지막으로 실제 속도 / 위치를 읽은 시각 */
 static uint32_t last_psd_tick;      /* 마지막으로 PSD 를 잰 시각 */
 static uint32_t last_psd_send_tick; /* 마지막으로 PSD 를 보낸 시각 */
 static uint32_t last_cmd_tick;      /* 마지막으로 ROS 명령을 받은 시각 */
@@ -327,20 +328,29 @@ static int check_motors(void)
   return ok;
 }
 
+/* 4바이트 (작은 자리 먼저) -> 부호 있는 32비트 정수 */
+static int32_t to_int32(const uint8_t *b)
+{
+  return (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+                   ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24));
+}
+
 /*
- * 모터 실제 속도 읽기 (Present Velocity, 128번, 4바이트 부호 있는 값)
- * 앞으로 가는 방향이 + 가 되도록 LEFT_DIR / RIGHT_DIR 을 곱해서 g_goal 과 비교하기 쉽게 한다.
+ * 모터 실제 속도와 위치(엔코더) 읽기
+ *   128번 Present Velocity (4바이트) 와 132번 Present Position (4바이트) 는
+ *   붙어 있어서 128번부터 8바이트를 한 번에 읽는다.
+ * 앞으로 가는 방향이 + 가 되도록 LEFT_DIR / RIGHT_DIR 을 곱한다.
+ * 읽기에 실패하면 이전 값을 그대로 둔다.
  */
 static void read_present_velocity(void)
 {
   const int dir[2] = { LEFT_DIR, RIGHT_DIR };
 
   for (int i = 0; i < count; i++) {
-    uint8_t buf[4];
-    if (dxl_read(ids[i], MX64_ADDR_PRESENT_VELOCITY, 4, buf) >= 0) {
-      int32_t v = (int32_t)(buf[0] | (buf[1] << 8) |
-                            ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24));
-      g_present_vel[i] = dir[i] * v;
+    uint8_t buf[8];
+    if (dxl_read(ids[i], MX64_ADDR_PRESENT_VELOCITY, 8, buf) >= 0) {
+      g_present_vel[i] = dir[i] * to_int32(&buf[0]);   /* 128~131: 속도 */
+      g_present_pos[i] = dir[i] * to_int32(&buf[4]);   /* 132~135: 위치 */
       g_present_rpm[i] = g_present_vel[i] * 0.229f;
     }
   }
@@ -437,6 +447,27 @@ static void send_psd(void)
     data[i * 2 + 1] = (uint8_t)(g_psd_mm[i] >> 8);
   }
   uint16_t n = proto_build(PROTO_CMD_PSD, data, 6, buf);
+  host_write(buf, n);
+}
+
+
+/* 젯슨에 엔코더 패킷을 보낸다 (위치 int32 왼쪽/오른쪽, 속도 int16 왼쪽/오른쪽) */
+static void send_encoder(void)
+{
+  uint8_t data[PROTO_ENCODER_LEN];
+  uint8_t buf[PROTO_ENCODER_LEN + 5];
+
+  for (int i = 0; i < 2; i++) {
+    uint32_t pos = (uint32_t)g_present_pos[i];
+    data[i * 4]     = (uint8_t)(pos & 0xFF);
+    data[i * 4 + 1] = (uint8_t)((pos >> 8) & 0xFF);
+    data[i * 4 + 2] = (uint8_t)((pos >> 16) & 0xFF);
+    data[i * 4 + 3] = (uint8_t)((pos >> 24) & 0xFF);
+    uint16_t vel = (uint16_t)(int16_t)g_present_vel[i];
+    data[8 + i * 2]     = (uint8_t)(vel & 0xFF);
+    data[8 + i * 2 + 1] = (uint8_t)(vel >> 8);
+  }
+  uint16_t n = proto_build(PROTO_CMD_ENCODER, data, PROTO_ENCODER_LEN, buf);
   host_write(buf, n);
 }
 
@@ -604,10 +635,11 @@ void app_loop(void)
     }
   }
 
-  /* ---- 준비 됨: 0.1초마다 실제 속도 읽기 ---- */
+  /* ---- 준비 됨: 0.05초마다 실제 속도 / 위치 읽고 젯슨에 엔코더 패킷 보내기 ---- */
   if (now - last_vel_tick >= VEL_PERIOD_MS) {
     last_vel_tick = now;
     read_present_velocity();
+    send_encoder();
   }
 
   /* ---- 준비 됨: 0.05초마다 속도 정해서 보내기 ---- */

@@ -69,6 +69,10 @@ try:
                     g, r = status["goal_rpm"], status["vel_rpm"]
                     print(f"    목표 rpm 왼쪽={g[0]:5.1f} 오른쪽={g[1]:5.1f} | "
                           f"실제 rpm 왼쪽={r[0]:5.1f} 오른쪽={r[1]:5.1f}")
+                if link.encoder:
+                    e, d = link.encoder, link.wheel_dist
+                    print(f"    엔코더 왼쪽={e['pos'][0]:8d} 오른쪽={e['pos'][1]:8d} | "
+                          f"굴러간 거리 왼쪽={d[0]:+.3f}m 오른쪽={d[1]:+.3f}m")
                 if link.psd:
                     p = link.psd
                     print(f"    PSD 왼쪽={p['left']:.2f}m 앞={p['front']:.2f}m 오른쪽={p['right']:.2f}m")

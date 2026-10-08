@@ -5,7 +5,9 @@ stm32_link.py - 젯슨 <-> STM32 패킷 주고받기 (App/proto.h, 팀 stm/proto
   CHK = (CMD + LEN + DATA) 합의 아래 8비트
 
   젯슨 -> STM32 : CMD 0x01, 왼쪽 바퀴 mm/s (int16), 오른쪽 바퀴 mm/s (int16)
+  STM32 -> 젯슨 : CMD 0x10 PSD, 0x11 엔코더, 0x81 상태
 """
+import math
 import struct
 import serial
 
@@ -17,6 +19,11 @@ CMD_WHEEL = 0x01
 WHEEL_SEPARATION = 0.160
 CMD_STATUS = 0x81
 CMD_PSD = 0x10
+CMD_ENCODER = 0x11
+
+TICKS_PER_REV = 4096          # MX-64 위치 값 4096 = 1바퀴
+WHEEL_RADIUS = 0.05           # 바퀴 반지름 (m). 임시값! 실측 후 수정
+MAX_JUMP_TICKS = 2048         # 0.05초에 이보다 많이 변하면 (모터 재부팅 등) 버린다
 
 RPM_PER_UNIT = 0.229          # MX-64 속도 값 1 = 0.229 rpm
 
@@ -63,6 +70,9 @@ class Stm32Link:
         self.buf = bytearray()
         self.reconnects = 0          # 다시 연결한 횟수
         self.psd = None              # 마지막 PSD 거리 {"left", "front", "right"} [m]
+        self.encoder = None          # 마지막 엔코더 {"pos", "vel_rpm"} (pos: 4096 = 1바퀴)
+        self.wheel_dist = [0.0, 0.0] # 시작부터 바퀴가 굴러간 거리 [m] (왼쪽, 오른쪽, 앞으로 = +)
+        self._last_pos = None        # 거리 계산용 이전 위치
         self.connected = True
 
     def _lost(self):
@@ -134,6 +144,12 @@ class Stm32Link:
                 self.psd = {"left": left / 1000.0, "front": front / 1000.0,
                             "right": right / 1000.0}
                 continue
+            if cmd == CMD_ENCODER and length == 12:
+                pl, pr, vl, vr = struct.unpack("<iihh", data)
+                self._add_distance((pl, pr))
+                self.encoder = {"pos": (pl, pr),
+                                "vel_rpm": (vl * RPM_PER_UNIT, vr * RPM_PER_UNIT)}
+                continue
             if cmd == CMD_STATUS and length >= 7:
                 ready, state, sw, hw0, hw1, volt = struct.unpack("<BBBBBH", data[:7])
                 count, id_l, id_r, torque = (data[7], data[8], data[9], data[10]) \
@@ -156,6 +172,15 @@ class Stm32Link:
                     "hw_err": (hw0, hw1),
                     "volt": volt / 10.0,
                 })
+
+    def _add_distance(self, pos):
+        """이전 위치와의 차이로 바퀴가 굴러간 거리를 더한다"""
+        if self._last_pos is not None:
+            for k in range(2):
+                diff = pos[k] - self._last_pos[k]
+                if abs(diff) <= MAX_JUMP_TICKS:   # 너무 큰 점프 (재부팅) 는 버린다
+                    self.wheel_dist[k] += diff / TICKS_PER_REV * 2 * math.pi * WHEEL_RADIUS
+        self._last_pos = pos
 
     def close(self):
         self.send_vel(0.0, 0.0)         # 마지막으로 정지 명령
