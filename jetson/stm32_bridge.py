@@ -29,7 +29,7 @@ class Stm32Bridge(Node):
         super().__init__("stm32_bridge")
         port = self.declare_parameter("port", "/dev/ttyUSB0").value
         self.timeout = self.declare_parameter("cmd_timeout", 0.5).value
-        separation = self.declare_parameter("wheel_separation", 0.160).value
+        separation = self.declare_parameter("wheel_separation", 0.175).value
 
         self.link = Stm32Link(port, separation=separation)
         self.v = 0.0

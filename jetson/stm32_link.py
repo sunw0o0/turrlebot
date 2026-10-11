@@ -15,14 +15,14 @@ HEAD1 = 0xAA
 HEAD2 = 0x55
 CMD_WHEEL = 0x01
 
-# 좌우 바퀴 사이 거리 (m). 팀 stm_bridge.yaml 의 wheel_separation 과 같게. 실측 후 수정
-WHEEL_SEPARATION = 0.160
+# 좌우 바퀴 사이 거리 (m). 실측 17.5cm. 팀 stm_bridge.yaml 의 wheel_separation 과 같게
+WHEEL_SEPARATION = 0.175
 CMD_STATUS = 0x81
 CMD_PSD = 0x10
 CMD_ENCODER = 0x11
 
 TICKS_PER_REV = 4096          # MX-64 위치 값 4096 = 1바퀴
-WHEEL_RADIUS = 0.05           # 바퀴 반지름 (m). 임시값! 실측 후 수정
+WHEEL_RADIUS = 0.0475         # 바퀴 반지름 (m). 지름 9.5cm 실측 / 2
 MAX_JUMP_TICKS = 2048         # 0.05초에 이보다 많이 변하면 (모터 재부팅 등) 버린다
 
 RPM_PER_UNIT = 0.229          # MX-64 속도 값 1 = 0.229 rpm

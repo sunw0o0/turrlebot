@@ -93,9 +93,9 @@
  * 로봇을 다시 조립해서 좌우가 바뀌면 이 값을 바꾼다. */
 #define LEFT_IS_SMALLER_ID 0
 
-/* ---- 로봇 치수 (임시값! 자로 재서 바꾸기) ----
- * 숫자 뒤의 f 는 "float(소수) 숫자" 라는 표시. 0.05f = 0.05 */
-#define WHEEL_RADIUS_M     0.05f   /* 바퀴 반지름 (m). _M = 미터 단위라는 뜻 */
+/* ---- 로봇 치수 (자로 잰 값) ----
+ * 숫자 뒤의 f 는 "float(소수) 숫자" 라는 표시. 0.0475f = 0.0475 */
+#define WHEEL_RADIUS_M     0.0475f /* 바퀴 반지름 (m). 지름 9.5cm 실측 / 2. _M = 미터 단위라는 뜻 */
 
 /* ---- 안전 제한 ---- */
 #define MAX_WHEEL_MPS   0.30f      /* 바퀴 최고 속도 0.3 m/s. MPS = Meter Per Second */

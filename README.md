@@ -118,7 +118,7 @@ STM32CubeIDE: `App` 폴더를 Source Location에 추가하고 (Project Propertie
 
 - `cmd_vel`(v, w) -> 바퀴 속도 변환은 **젯슨**에서 한다: 왼쪽 = v - w·L/2, 오른쪽 = v + w·L/2 (L = `wheel_separation`, 팀 `stm_bridge.yaml`)
 - STM32 는 바퀴 선속도(m/s) / r -> rad/s -> rpm -> ÷ 0.229 로 MX-64 값을 만든다
-- 바퀴 반지름 `WHEEL_RADIUS_M` = 0.05 m 는 **임시값** (`app.c`). 실제로 재서 바꿀 것
+- 바퀴 반지름 `WHEEL_RADIUS_M` = 0.0475 m (지름 9.5cm 실측, `app.c`), 바퀴 사이 거리 0.175 m (실측, 팀 `stm_bridge.yaml` 의 `wheel_separation`)
 - 안전 제한: 바퀴 속도 최대 0.3 m/s, 모터 값 최대 250 (넘으면 두 바퀴를 같은 비율로 줄임)
 - 0.3초 동안 명령이 없으면 정지. 젯슨은 멈춰 있을 때도 20Hz 로 계속 보낸다
 - 팀 C++ `stm_bridge` 는 0x81 상태 패킷을 몰라서 5초마다 `Unknown frame id=0x81` 경고를 찍는다 (동작에는 문제 없음)
