@@ -1,0 +1,43 @@
+construction:
+  ros__parameters:
+    # task_planner 를 같이 쓰는지 (launch 파일이 task_planner 인자에 맞춰 정한다)
+    use_task_planner: false
+
+    # 1) 공사 표지판 인식 -> 장애물 피하기 모드
+    min_confidence: 0.5
+    sign_area_ratio_threshold: 0.02 # 표지판 크기 / 화면 크기. 이보다 커야(= 가까워야) 시작
+    sign_hits_needed: 3             # 연속으로 이만큼 봐야 시작
+
+    # 2) 색 (lane_detection.yaml / path_planner.yaml 과 같은 실측값. 조명이 바뀌면 같이 맞추기)
+    image_topic: image_bev
+    yellow_l_min: 80
+    yellow_b_min: 150
+    yellow_a_max: 135               # 노란선 a≈126, 갈색 박스 a≈145
+    white_l_min: 190
+    white_ab_dev: 15
+    box_l_min: 10                   # 박스 (어두운 적갈색) 실측 L 20~47, a 143~147, b 136~140
+    box_l_max: 110
+    box_a_min: 137
+    box_a_max: 165
+    box_b_min: 128
+    box_b_max: 152
+    box_min_b_minus_a: -15          # 빨간 정지선 빼기
+    box_min_area: 300               # [px] 이보다 작은 갈색 덩어리는 잡음
+
+    # 3) 위치 (BEV 400x400, 1px ≈ 1mm)
+    bev_center_x: 0.5               # 로봇 가로 위치 (화면 폭 비율)
+    lane_width_px: 267.0            # 두 차선 사이 폭. 한쪽 선만 보이면 다른 쪽을 이만큼 떨어진 곳으로 봄
+    robot_y_offset_px: 335.0        # 바퀴 축이 화면 맨 아래보다 뒤에 있는 거리 [px]
+    line_band_px: 20                # 차선 위치를 잴 때 위아래로 볼 줄 수
+    line_min_pixels: 30             # 이보다 적으면 그 차선이 안 보이는 걸로 봄
+    lane_ref_ratio: 0.75            # 장애물이 없을 때 차선을 잴 높이 (0 위 ~ 1 아래)
+    line_keep_px: 40.0              # 로봇 중심을 각 차선에서 이만큼 [px] 안쪽에 둠 (차선 밖으로 안 나감)
+
+    # 4) 운전
+    avoid_speed: 0.07               # [m/s]
+    steer_gain: 1.5                 # 목표 방향 각도 -> 회전 속도 (흔들리면 줄이고, 늦게 피하면 키움)
+    max_angular: 1.0                # [rad/s]
+    exit_clear_time: 3.0            # [s] 장애물이 이 시간 동안 안 보이면 공사 구간 끝
+    zone_timeout: 30.0              # [s] 공사 구간 최대 시간
+    image_timeout: 0.5              # [s] 영상이 이 시간 동안 안 오면 정지
+    front_stop_distance: 0.10       # [m] 정면 PSD 가 이보다 가까우면 정지 (0 = 끔)

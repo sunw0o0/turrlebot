@@ -27,3 +27,28 @@ git checkout -b parking-zone
 git apply ~/turrlebot/team_patch/parking_v2.patch
 cd colcon_ws && colcon build --packages-select interfaces lane_detection lane_follower task_planner turtle_gui path_planner map_planner
 ```
+
+## construction.patch - parking_v2.patch 위에 적용
+공사 표지판(sign_construction)을 보면 장애물 피하기 모드.
+
+1. 공사 표지판이 가까이 3번 연속 -> control_mode CONSTRUCTION (lane_follower 정지, construction_node 가 운전)
+2. image_bev 에서 노란선 / 흰선 / 갈색 박스를 색으로 찾음 (lane_detection, path_planner 실측값)
+   - 장애물 + 차선: 장애물 양옆 빈 공간 중 넓은 쪽 가운데로 (= 장애물에 붙은 차선에서 멀어짐)
+   - 로봇 중심은 항상 두 차선 안쪽 (line_keep_px)
+   - 차선이 안 보이면 직진, 장애물이 없으면 차선 가운데
+3. 장애물이 3초 동안 안 보이면 끝 -> LANE
+
+| 파일 | 변경 |
+|---|---|
+| `interfaces/msg/ControlMode.msg` | `CONSTRUCTION = 5` 추가 |
+| `lane_follower/src/construction_node.cpp`, `config/construction.yaml` | 새 파일 |
+| `lane_follower/CMakeLists.txt`, `package.xml` | OpenCV, cv_bridge 의존성 |
+| `lane_follower/launch/lane_follower.launch.py` | construction_node 실행 (`construction:=false` 로 끄기) |
+| `task_planner` | `construction_active` 동안 CONSTRUCTION 모드 |
+| `turtle_gui` | 모드 이름 CONSTRUCTION 표시 |
+
+```bash
+cd ~/team                     # 젯슨: ~/Robit_intelligence_turtlebot_team
+git apply ~/turrlebot/team_patch/construction.patch
+cd colcon_ws && colcon build --packages-up-to lane_follower turtle_gui
+```
