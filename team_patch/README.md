@@ -85,3 +85,28 @@ cp ~/turrlebot/team_patch/parking.yaml colcon_ws/src/lane_follower/config/
 python3 ~/turrlebot/team_patch/add_parking_vision_build.py .
 cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select lane_follower
 ```
+
+## 0단계: 오도메트리 확인 (odom_test.py)
+
+엔코더 -> `/odom` 은 팀원이 `hybrid-drive` 브랜치에 이미 만들어 두었다 (커밋 2d84161, stm 패키지).
+main 에는 아직 없으므로 stm 폴더만 그 브랜치에서 가져와 빌드한다 (interfaces 변경은 주석/다른 메시지라 그대로 둬도 됨).
+
+```bash
+cd ~/Robit_intelligence_turtlebot_team
+git fetch origin
+git checkout origin/hybrid-drive -- colcon_ws/src/stm
+cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select stm
+```
+
+시험 (터미널 2개, S1 켠 상태. 다른 노드는 끄고 stm_bridge 만):
+
+```bash
+# 터미널 1
+ros2 launch stm stm_bridge.launch.py
+# 터미널 2
+python3 ~/turrlebot/team_patch/odom_test.py forward 1.0   # 엔코더 기준 1 m 직진 -> 줄자로 실제 거리
+python3 ~/turrlebot/team_patch/odom_test.py turn 360      # 엔코더 기준 360도 -> 처음 방향과 비교
+python3 ~/turrlebot/team_patch/odom_test.py show          # 움직이지 않고 거리/각도만 표시
+```
+
+틀리면 `colcon_ws/src/stm/config/stm_bridge.yaml` 의 `wheel_radius`(거리), `wheel_separation`(각도) 를 고친다.
