@@ -14,7 +14,8 @@
 //          │                              단, 로봇 중심은 항상 두 차선 안쪽에 둔다
 //          │    - 장애물만 있고 차선이 없으면 : 직진
 //          │    - 장애물이 없으면       : 차선 가운데로 (차선도 없으면 직진)
-//          │  장애물이 exit_clear_time 동안 안 보이면 공사 구간 끝
+//          │  주차 표지판이 가까이 3번 연속 보이면 공사 구간 끝 (주차 노드가 이어받음)
+//          │  (exit_clear_time > 0 이면 장애물이 그 시간 동안 안 보여도 끝)
 //          ▼
 //   (3) FINISHED : control_mode 를 LANE 으로 돌려준다 -> 평소 자율주행
 //
@@ -84,6 +85,9 @@ public:
     min_confidence_ = declare_parameter("min_confidence", 0.5);
     sign_area_ratio_threshold_ = declare_parameter("sign_area_ratio_threshold", 0.02);
     sign_hits_needed_ = declare_parameter("sign_hits_needed", 3);
+    // 끝: 주차 표지판 (parking.yaml 의 표지판 조건과 같게)
+    parking_sign_area_ratio_threshold_ = declare_parameter("parking_sign_area_ratio_threshold", 0.03);
+    parking_sign_hits_needed_ = declare_parameter("parking_sign_hits_needed", 3);
     const auto image_topic = declare_parameter("image_topic", std::string("image_bev"));
     // 색 (lane_detection / path_planner 와 같은 실측값, OpenCV LAB)
     yellow_l_min_ = declare_parameter("yellow_l_min", 80);
@@ -111,8 +115,8 @@ public:
     avoid_speed_ = declare_parameter("avoid_speed", 0.07);
     steer_gain_ = declare_parameter("steer_gain", 1.5);
     max_angular_ = declare_parameter("max_angular", 1.0);
-    exit_clear_time_ = declare_parameter("exit_clear_time", 3.0);
-    zone_timeout_ = declare_parameter("zone_timeout", 30.0);
+    exit_clear_time_ = declare_parameter("exit_clear_time", 0.0);
+    zone_timeout_ = declare_parameter("zone_timeout", 0.0);
     image_timeout_ = declare_parameter("image_timeout", 0.5);
     front_stop_distance_ = declare_parameter("front_stop_distance", 0.10);
 
@@ -164,6 +168,18 @@ private:
       sign.confidence >= min_confidence_ &&
       sign.area_ratio >= sign_area_ratio_threshold_;
     sign_hits_ = close_sign ? sign_hits_ + 1 : 0;
+
+    // 공사 구간 중에 주차 표지판이 가까이 연속으로 보이면 -> 끝 (주차 노드가 이어받는다)
+    const bool close_parking_sign =
+      sign.type == Sign::PARKING &&
+      sign.confidence >= min_confidence_ &&
+      sign.area_ratio >= parking_sign_area_ratio_threshold_;
+    parking_hits_ = close_parking_sign ? parking_hits_ + 1 : 0;
+    if (state_ == State::AVOIDING && parking_hits_ >= parking_sign_hits_needed_)
+    {
+      finish("주차 표지판 인식", true);
+      return;
+    }
 
     if (state_ == State::WAITING && sign_hits_ >= sign_hits_needed_)
     {
@@ -218,8 +234,9 @@ private:
       last_obstacle_ = now();
     }
 
-    // 장애물이 한동안 안 보이면 공사 구간 끝
-    if (obstacle_seen_ && (now() - last_obstacle_).seconds() >= exit_clear_time_)
+    // (선택) 장애물이 한동안 안 보이면 공사 구간 끝. exit_clear_time = 0 이면 안 씀
+    if (exit_clear_time_ > 0.0 && obstacle_seen_ &&
+      (now() - last_obstacle_).seconds() >= exit_clear_time_)
     {
       finish("장애물이 더 이상 안 보임", true);
       return;
@@ -413,7 +430,7 @@ private:
     {
       return;
     }
-    if ((now() - zone_start_).seconds() >= zone_timeout_)
+    if (zone_timeout_ > 0.0 && (now() - zone_start_).seconds() >= zone_timeout_)
     {
       finish("공사 구간 시간 초과", true);
       return;
@@ -474,6 +491,8 @@ private:
   double min_confidence_;
   double sign_area_ratio_threshold_;
   int64_t sign_hits_needed_;
+  double parking_sign_area_ratio_threshold_;
+  int64_t parking_sign_hits_needed_;
   int64_t yellow_l_min_, yellow_b_min_, yellow_a_max_;
   int64_t white_l_min_, white_ab_dev_;
   int64_t box_l_min_, box_l_max_, box_a_min_, box_a_max_, box_b_min_, box_b_max_;
@@ -495,6 +514,7 @@ private:
 
   State state_ = State::WAITING;
   int64_t sign_hits_ = 0;
+  int64_t parking_hits_ = 0;
   bool obstacle_seen_ = false;
   rclcpp::Time zone_start_;
   rclcpp::Time last_obstacle_;

@@ -36,7 +36,8 @@ cd colcon_ws && colcon build --packages-select interfaces lane_detection lane_fo
    - 장애물 + 차선: 장애물 양옆 빈 공간 중 넓은 쪽 가운데로 (= 장애물에 붙은 차선에서 멀어짐)
    - 로봇 중심은 항상 두 차선 안쪽 (line_keep_px)
    - 차선이 안 보이면 직진, 장애물이 없으면 차선 가운데
-3. 장애물이 3초 동안 안 보이면 끝 -> LANE
+3. 주차 표지판이 가까이 3번 연속 보이면 끝 -> LANE (주차 노드가 이어받음)
+   (`exit_clear_time`, `zone_timeout` 을 0 보다 크게 하면 그 조건으로도 끝남. 기본 0 = 안 씀)
 
 | 파일 | 변경 |
 |---|---|
