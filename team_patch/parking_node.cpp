@@ -22,8 +22,11 @@
 //          │        동시에 BEV 왼쪽 아래 칸을 본다:
 //          │          노란선 있음 -> 없음 (입구의 빈 곳이 지나감) -> 다시 있음 (입구 반대쪽 모서리)
 //          │  "다시 있음" = 반대쪽 노란선이 화면 맨 아래에 닿음
-//          │  화면 맨 아래는 바퀴 축 14.1cm 앞, 입구 가운데는 반대쪽 선에서 약 14cm 앞
-//          │  -> 지금 바퀴 축이 입구 가운데에 있다
+//          │  입구 가운데는 반대쪽 선에서 차선 폭 절반(약 14.7cm) 앞.
+//          │  화면 맨 아래가 바퀴 축에서 그보다 멀면(카메라 각도에 따라 14.1cm / 17.9cm),
+//          │  바퀴 축이 아직 입구 가운데에 못 온 것 -> 남은 거리만큼 더 직진 (EXTRA)
+//          ▼
+//   (2-1) EXTRA  : 남은 거리 / 속도 만큼의 시간 동안 흰선 보고 더 직진 (남은 거리가 0 이면 건너뜀)
 //          ▼
 //   (3) TURN     : 제자리에서 왼쪽으로 돈다.
 //          │        BEV 에 입구 길의 노란선 두 개(왼쪽, 오른쪽)가 세로로 똑바로 보이면 멈춘다
@@ -31,7 +34,7 @@
 //   (4) DONE     : 멈추고 control_mode = STOP ("parking_node:at_entrance")
 //                  (다음 단계 - 길 올라가기, 빈 칸 고르기, 주차 - 는 아직 없음)
 //
-// [위에서 본 영상(BEV)]  400 x 400 px, 1px = 1mm. 화면 맨 아래 = 바퀴 축 14.1cm 앞
+// [위에서 본 영상(BEV)]  400 x 400 px, 1px = 1mm. 화면 맨 아래 = 바퀴 축 17.9cm 앞 (2026-10-13 카메라 각도)
 //
 //        x=0                    x=400
 //    y=0  ┌──────────────────────┐
@@ -98,6 +101,7 @@ class ParkingNode : public rclcpp::Node
   {
     WAITING,     // 주차 표지판 기다리는 중 (운전은 lane_follower)
     APPROACH,    // 흰선 보고 직진하며 입구 찾는 중 (이 노드가 운전)
+    EXTRA,       // 입구 가운데까지 남은 거리만큼 더 직진 (이 노드가 운전)
     TURN,        // 입구에서 왼쪽으로 도는 중 (이 노드가 운전)
     DONE,        // 끝 (또는 그만둠)
   };
@@ -188,7 +192,7 @@ private:
     offset_gain_ = declare_parameter("offset_gain", 1.0);
     offset_soft_px_ = declare_parameter("offset_soft_px", 300.0);
     max_angular_ = declare_parameter("max_angular", 0.6);
-    robot_y_offset_px_ = declare_parameter("robot_y_offset_px", 141.0);
+    robot_y_offset_px_ = declare_parameter("robot_y_offset_px", 179.0);
 
     // 4) 입구 찾기 (왼쪽 아래 칸)
     watch_x_max_ = declare_parameter("watch_x_max", 120);
@@ -197,6 +201,7 @@ private:
     present_pixels_ = declare_parameter("present_pixels", 80);
     empty_pixels_ = declare_parameter("empty_pixels", 15);
     gap_frames_needed_ = declare_parameter("gap_frames_needed", 2);
+    extra_forward_m_ = declare_parameter("extra_forward_m", 0.0);
 
     // 5) 회전
     turn_speed_ = declare_parameter("turn_speed", 0.4);
@@ -279,9 +284,13 @@ private:
     {
       if (entrance_reached(yellow))
       {
-        start_turn();
+        start_extra();
         return;
       }
+      drive_along_white(white_mask(lab));
+    }
+    else if (state_ == State::EXTRA)
+    {
       drive_along_white(white_mask(lab));
     }
     else
@@ -415,6 +424,25 @@ private:
     return false;
   }
 
+  // ==================== (2-1) EXTRA: 입구 가운데까지 남은 만큼 더 직진 ====================
+
+  // 반대쪽 노란선이 watch_bottom 줄에 닿았을 때, 바퀴 축 ~ 그 선 거리 = (화면 맨 아래 - watch_bottom) + robot_y_offset
+  // 입구 가운데 ~ 그 선 거리 = 차선 폭 / 2. 그 차이가 더 가야 할 거리 (음수면 0)
+  void start_extra()
+  {
+    const double to_line_px = (399.0 - watch_bottom_) + robot_y_offset_px_;
+    const double extra_m = std::max(0.0, (to_line_px - lane_width_px_ / 2.0) * 0.001 + extra_forward_m_);
+    extra_time_ = extra_m / approach_speed_;
+    if (extra_time_ <= 0.0)
+    {
+      start_turn();
+      return;
+    }
+    state_ = State::EXTRA;
+    state_time_ = 0.0;
+    RCLCPP_INFO(get_logger(), "입구 가운데까지 %.1fcm 더 직진 (%.1f초)", extra_m * 100.0, extra_time_);
+  }
+
   // ==================== (3) TURN: 왼쪽으로 돌기 ====================
 
   void start_turn()
@@ -493,9 +521,15 @@ private:
     }
 
     // lane_follower 가 멈춰 있도록 "주차 중" 을 계속 알린다
-    publish_mode(ControlMode::PARKING, state_ == State::APPROACH ? "approach" : "turn");
+    publish_mode(ControlMode::PARKING, state_ == State::APPROACH ? "approach" :
+      (state_ == State::EXTRA ? "extra" : "turn"));
 
     state_time_ += 0.1;
+    if (state_ == State::EXTRA && state_time_ >= extra_time_)
+    {
+      start_turn();
+      return;
+    }
     if (state_ == State::APPROACH && approach_timeout_ > 0.0 && state_time_ >= approach_timeout_)
     {
       give_up("입구를 못 찾음 (approach_timeout)");
@@ -519,7 +553,7 @@ private:
 
   bool i_am_driving() const
   {
-    return state_ == State::APPROACH || state_ == State::TURN;
+    return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN;
   }
 
   // 바퀴 명령. 앞으로 갈 때 앞이 막혔으면 멈춤
@@ -590,6 +624,7 @@ private:
   int64_t present_pixels_;
   int64_t empty_pixels_;
   int64_t gap_frames_needed_;
+  double extra_forward_m_;
   double turn_speed_;
   double turn_kp_;
   double turn_min_speed_;
@@ -610,6 +645,7 @@ private:
   int64_t gap_frames_ = 0;         // 지금 조건이 연속으로 맞은 프레임 수
   int64_t sign_hits_ = 0;
   double state_time_ = 0.0;        // 지금 단계에 들어온 뒤 지난 시간 [s]
+  double extra_time_ = 0.0;        // EXTRA 단계에서 더 직진할 시간 [s]
   rclcpp::Time last_image_time_;
   interfaces::msg::PsdArray psd_;
   bool psd_received_ = false;

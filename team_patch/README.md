@@ -155,7 +155,10 @@ main 의 lane_follower.launch.py 가 parking_node 를 같이 띄우므로 manual
 ```bash
 cd ~/turrlebot && git pull
 cd ~/Robit_intelligence_turtlebot_team
+git fetch origin
+git checkout origin/hybrid-parking -- colcon_ws/src/vision/bird_eye_view    # 2026-10-13 카메라 각도 보정 (17.9cm)
 cp ~/turrlebot/team_patch/parking_node.cpp colcon_ws/src/lane_follower/src/
 cp ~/turrlebot/team_patch/parking.yaml colcon_ws/src/lane_follower/config/
-cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select lane_follower
+cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select bird_eye_view lane_follower
 ```
+parking.yaml 의 robot_y_offset_px 는 bird_eye_view 보정과 같아야 한다 (17.9cm 보정 = 179, 14.1cm 보정 = 141).

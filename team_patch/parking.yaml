@@ -7,7 +7,7 @@ parking:
     sign_hits_needed: 2             # 연속으로 이만큼 봐야 시작
     skip_sign: false                # 시험용. true 면 표지판 없이 켜자마자 시작
 
-    # 2) 색 / 화면 (BEV 400x400, 1px = 1mm, 화면 맨 아래 = 바퀴 축 14.1cm 앞)
+    # 2) 색 / 화면 (BEV 400x400, 1px = 1mm)
     image_topic: image_bev
     yellow_l_min: 80                # 노란색 (lane_detection.yaml 과 같게)
     yellow_b_min: 150
@@ -25,16 +25,17 @@ parking:
     offset_gain: 1.0
     offset_soft_px: 300.0
     max_angular: 0.6                # [rad/s]
-    robot_y_offset_px: 141.0        # 화면 맨 아래가 바퀴 축에서 몇 px 앞인지
+    robot_y_offset_px: 179.0        # 화면 맨 아래가 바퀴 축에서 몇 px(mm) 앞인지. bird_eye_view.yaml 과 같게!
+                                    #   2026-10-13 카메라 각도 수정 후 보정 = 179 (17.9cm), 그 전 보정 = 141
 
     # 4) 입구 찾기: 왼쪽 아래 칸의 노란선이 있음 -> 없음(입구) -> 다시 있음(반대쪽 모서리)이면 회전
     watch_x_max: 120                # 칸 가로 범위 [0, 이 값) px
     watch_rows: 20                  # 칸 세로 줄 수
-    watch_bottom: 390               # 칸의 맨 아래 줄. 작게 하면 더 일찍 돎, 크게(최대 399) 하면 늦게 돎
-                                    #   10 줄 = 1cm. 늦게 돌면 370, 일찍 돌면 399 쪽으로
+    watch_bottom: 390               # 칸의 맨 아래 줄 (최대 399). 도는 위치는 이 값과 robot_y_offset_px 로 자동 계산
     present_pixels: 80              # 이 이상이면 "노란선 있음"
     empty_pixels: 15                # 이 이하면 "노란선 없음"
     gap_frames_needed: 2            # 연속 이만큼 프레임
+    extra_forward_m: 0.0            # [m] 돌기 전 더 갈 거리 (늦게 돌면 -, 일찍 돌면 +). 자동 계산한 거리에 더해짐
 
     # 5) 회전: 입구 길의 두 노란선이 화면에 세로로 똑바로 보일 때까지 왼쪽으로
     turn_speed: 0.4                 # [rad/s]
