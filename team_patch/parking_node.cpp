@@ -31,9 +31,11 @@
 //   (3) TURN     : 제자리에서 왼쪽으로 돈다.
 //          │        BEV 에 입구 길의 노란선 두 개(왼쪽, 오른쪽)가 세로로 똑바로 보이면 다음으로
 //          ▼
-//   (4) STEM     : 주차장 길을 올라간다. 양쪽이 노란선 -> 두 노란선의 가운데로 (흰선은 안 봄)
+//   (4) STEM     : 주차장 길을 올라간다. 양쪽이 노란선 -> 두 노란선의 가운데로
+//          │        노란선이 끝나면 같은 줄로 흰 점선(주차장 통로와 칸을 나누는 선)이 이어진다
+//          │        -> 노란선과 흰선을 둘 다 차선으로 보고 그 가운데로 계속 직진 (stem_use_white)
 //          │        한쪽만 보이면 그 선에서 차선 폭 절반만큼 떨어져서 간다
-//          │  노란선이 둘 다 연속으로 안 보임 = 길 끝 (주차장 입구)
+//          │  차선(노란선 / 흰 점선)이 둘 다 연속으로 안 보임 = 통로 끝
 //          ▼
 //   (5) DONE     : 멈추고 control_mode = STOP ("parking_node:stem_end")
 //                  (다음 단계 - 빈 칸 고르기, 주차 - 는 아직 없음)
@@ -110,7 +112,7 @@ class ParkingNode : public rclcpp::Node
     APPROACH,    // 흰선 보고 직진하며 입구 찾는 중 (이 노드가 운전)
     EXTRA,       // 입구 가운데까지 남은 거리만큼 더 직진 (이 노드가 운전)
     TURN,        // 입구에서 왼쪽으로 도는 중 (이 노드가 운전)
-    STEM,        // 주차장 길을 두 노란선 가운데로 올라가는 중 (이 노드가 운전)
+    STEM,        // 주차장 길 -> 통로를 두 차선(노란선 / 흰 점선) 가운데로 올라가는 중 (이 노드가 운전)
     DONE,        // 끝 (또는 그만둠)
   };
 
@@ -229,6 +231,7 @@ private:
     turn_fit_rows_ = declare_parameter("turn_fit_rows", 230);
 
     // 6) 주차장 길 올라가기
+    stem_use_white_ = declare_parameter("stem_use_white", true);
     stem_end_frames_ = declare_parameter("stem_end_frames", 3);
     stem_min_time_ = declare_parameter("stem_min_time", 2.0);
     stem_timeout_ = declare_parameter("stem_timeout", 20.0);
@@ -339,7 +342,13 @@ private:
     }
     else
     {
-      drive_between_yellow(yellow);
+      // 노란선 + (흰 점선). 가로로 누운 흰선(주차장 테두리)은 선을 이을 때 빠진다
+      cv::Mat lines = yellow;
+      if (stem_use_white_)
+      {
+        cv::bitwise_or(yellow, white_mask(lab), lines);
+      }
+      drive_between_lines(lines);
     }
   }
 
@@ -567,29 +576,29 @@ private:
     drive(0.0, w);
   }
 
-  // ==================== (4) STEM: 두 노란선 가운데로 길 올라가기 ====================
+  // ==================== (4) STEM: 두 차선 가운데로 길 / 통로 올라가기 ====================
 
   void start_stem(double lean)
   {
     state_ = State::STEM;
     state_time_ = 0.0;
     lines_missing_ = 0;
-    RCLCPP_INFO(get_logger(), "입구 길을 똑바로 봄 (남은 기울기 %.1f도) -> 두 노란선 가운데로 올라감",
+    RCLCPP_INFO(get_logger(), "입구 길을 똑바로 봄 (남은 기울기 %.1f도) -> 두 차선 가운데로 올라감",
       lean * 180.0 / M_PI);
   }
 
-  // 왼쪽/오른쪽 노란선을 잇고 그 가운데를 따라간다.
+  // 왼쪽/오른쪽 차선(노란선, 흰 점선)을 잇고 그 가운데를 따라간다.
   //   둘 다 보이고 간격이 길 폭 정도 -> 두 선의 가운데
   //   하나만 보임                      -> 그 선에서 차선 폭 절반만큼 안쪽
-  //   둘 다 안 보임이 연속              -> 길 끝 (주차장 입구) -> 멈춤
-  void drive_between_yellow(const cv::Mat & yellow)
+  //   둘 다 안 보임이 연속              -> 통로 끝 -> 멈춤
+  void drive_between_lines(const cv::Mat & lines)
   {
-    const int mid = static_cast<int>(bev_center_x_ * yellow.cols);
-    std::optional<Line> left = fit_line(yellow, 0, mid, yellow.rows);
-    std::optional<Line> right = fit_line(yellow, mid, yellow.cols, yellow.rows);
+    const int mid = static_cast<int>(bev_center_x_ * lines.cols);
+    std::optional<Line> left = fit_line(lines, 0, mid, lines.rows);
+    std::optional<Line> right = fit_line(lines, mid, lines.cols, lines.rows);
 
     // 두 선 간격이 길 폭과 너무 다르면 (잘못 찾은 선) 둘 다 믿지 않고 직진
-    const double bottom_y = yellow.rows - 1;
+    const double bottom_y = lines.rows - 1;
     if (left && right)
     {
       const double gap = right->x_at(bottom_y) - left->x_at(bottom_y);
@@ -631,7 +640,7 @@ private:
       center = *right;
       center.a -= lane_width_px_ / 2.0;
     }
-    drive(speed_, steer_to(center, yellow.rows, yellow.cols));
+    drive(speed_, steer_to(center, lines.rows, lines.cols));
   }
 
   // ==================== 끝내기 ====================
@@ -641,7 +650,7 @@ private:
     stop_wheels();
     state_ = State::DONE;
     publish_mode(ControlMode::STOP, "stem_end");
-    RCLCPP_INFO(get_logger(), "노란선이 끝남 (주차장 입구, %.1f초 올라감) -> 정지 (다음 단계는 아직 없음)",
+    RCLCPP_INFO(get_logger(), "차선이 끝남 (통로 끝, %.1f초 올라감) -> 정지 (다음 단계는 아직 없음)",
       state_time_);
   }
 
@@ -799,6 +808,7 @@ private:
   double pair_gap_max_px_;
   double turn_min_time_;
   int64_t turn_fit_rows_;
+  bool stem_use_white_;
   int64_t stem_end_frames_;
   double stem_min_time_;
   double stem_timeout_;
@@ -815,7 +825,7 @@ private:
   double state_time_ = 0.0;        // 지금 단계에 들어온 뒤 지난 시간 [s]
   double extra_time_ = 0.0;        // EXTRA 단계에서 더 직진할 시간 [s]
   double speed_ = 0.10;            // 지금 쓰는 직진 속도 [m/s] (주차 시작할 때 정함)
-  int64_t lines_missing_ = 0;      // STEM 에서 노란선이 둘 다 연속으로 안 보인 프레임 수
+  int64_t lines_missing_ = 0;      // STEM 에서 차선이 둘 다 연속으로 안 보인 프레임 수
   rclcpp::Time last_image_time_;
   interfaces::msg::PsdArray psd_;
   bool psd_received_ = false;
