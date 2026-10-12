@@ -1,5 +1,5 @@
 // ============================================================================
-//  parking_node.cpp - 주차 구간 (1~2단계: 카메라만 보고 주차장 입구에서 왼쪽으로 꺾기)
+//  parking_node.cpp - 주차 구간 (카메라만 보고: 입구에서 왼쪽으로 꺾기 -> 주차장 길 올라가기)
 // ============================================================================
 //
 // [트랙 모양] (위에서 본 지도, 로봇은 아래 도로를 왼쪽 -> 오른쪽으로 달린다)
@@ -29,10 +29,14 @@
 //   (2-1) EXTRA  : 남은 거리 / 속도 만큼의 시간 동안 흰선 보고 더 직진 (남은 거리가 0 이면 건너뜀)
 //          ▼
 //   (3) TURN     : 제자리에서 왼쪽으로 돈다.
-//          │        BEV 에 입구 길의 노란선 두 개(왼쪽, 오른쪽)가 세로로 똑바로 보이면 멈춘다
+//          │        BEV 에 입구 길의 노란선 두 개(왼쪽, 오른쪽)가 세로로 똑바로 보이면 다음으로
 //          ▼
-//   (4) DONE     : 멈추고 control_mode = STOP ("parking_node:at_entrance")
-//                  (다음 단계 - 길 올라가기, 빈 칸 고르기, 주차 - 는 아직 없음)
+//   (4) STEM     : 주차장 길을 올라간다. 양쪽이 노란선 -> 두 노란선의 가운데로 (흰선은 안 봄)
+//          │        한쪽만 보이면 그 선에서 차선 폭 절반만큼 떨어져서 간다
+//          │  노란선이 둘 다 연속으로 안 보임 = 길 끝 (주차장 입구)
+//          ▼
+//   (5) DONE     : 멈추고 control_mode = STOP ("parking_node:stem_end")
+//                  (다음 단계 - 빈 칸 고르기, 주차 - 는 아직 없음)
 //
 // [위에서 본 영상(BEV)]  400 x 400 px, 1px = 1mm. 화면 맨 아래 = 바퀴 축 17.9cm 앞 (2026-10-13 카메라 각도)
 //
@@ -49,7 +53,7 @@
 //   - 직진 중 정면 PSD 가 front_stop_distance 보다 가까우면 멈추고 기다린다
 //   - 영상이 image_timeout 초 동안 안 오면 멈춘다
 //   - GUI 에서 STOP / MANUAL 을 누르면 바로 멈추고 주차를 그만둔다
-//   - approach_timeout / turn_timeout 이 지나면 멈추고 그만둔다
+//   - approach_timeout / turn_timeout / stem_timeout 이 지나면 멈추고 그만둔다
 
 #include <algorithm>
 #include <chrono>
@@ -103,6 +107,7 @@ class ParkingNode : public rclcpp::Node
     APPROACH,    // 흰선 보고 직진하며 입구 찾는 중 (이 노드가 운전)
     EXTRA,       // 입구 가운데까지 남은 거리만큼 더 직진 (이 노드가 운전)
     TURN,        // 입구에서 왼쪽으로 도는 중 (이 노드가 운전)
+    STEM,        // 주차장 길을 두 노란선 가운데로 올라가는 중 (이 노드가 운전)
     DONE,        // 끝 (또는 그만둠)
   };
 
@@ -201,7 +206,7 @@ private:
     present_pixels_ = declare_parameter("present_pixels", 80);
     empty_pixels_ = declare_parameter("empty_pixels", 15);
     gap_frames_needed_ = declare_parameter("gap_frames_needed", 2);
-    extra_forward_m_ = declare_parameter("extra_forward_m", 0.0);
+    extra_forward_m_ = declare_parameter("extra_forward_m", 0.02);
 
     // 5) 회전
     turn_speed_ = declare_parameter("turn_speed", 0.4);
@@ -213,6 +218,12 @@ private:
     pair_gap_max_px_ = declare_parameter("pair_gap_max_px", 380.0);
     turn_min_time_ = declare_parameter("turn_min_time", 1.0);
     turn_fit_rows_ = declare_parameter("turn_fit_rows", 230);
+
+    // 6) 주차장 길 올라가기
+    stem_speed_ = declare_parameter("stem_speed", 0.06);
+    stem_end_frames_ = declare_parameter("stem_end_frames", 3);
+    stem_min_time_ = declare_parameter("stem_min_time", 2.0);
+    stem_timeout_ = declare_parameter("stem_timeout", 20.0);
 
     // 안전
     front_stop_distance_ = declare_parameter("front_stop_distance", 0.10);
@@ -293,9 +304,13 @@ private:
     {
       drive_along_white(white_mask(lab));
     }
-    else
+    else if (state_ == State::TURN)
     {
       turn_until_aligned(yellow);
+    }
+    else
+    {
+      drive_between_yellow(yellow);
     }
   }
 
@@ -381,16 +396,23 @@ private:
       return;
     }
 
-    const double robot_x = bev_center_x_ * white.cols;
-    const double bottom_y = white.rows - 1;
-    // 방향 오차: 흰선이 왼쪽으로 기운 만큼 왼쪽으로 돈다
-    // 위치 오차: 차선 가운데를 바퀴 축 높이까지 이어서, 로봇보다 오른쪽에 얼마나 있는지
-    const double center_at_axle = line->x_at(bottom_y) - lane_width_px_ / 2.0 +
-      line->b * robot_y_offset_px_;
+    Line center = *line;
+    center.a -= lane_width_px_ / 2.0;      // 흰선에서 차선 폭 절반만큼 왼쪽 = 차선 가운데
+    drive(approach_speed_, steer_to(center, white.rows, white.cols));
+  }
+
+  // 차선 가운데 선(center)을 따라가는 회전 속도 [rad/s]. + 왼쪽, - 오른쪽
+  //   방향 오차: 가운데 선이 왼쪽으로 기운 만큼 왼쪽으로 돈다
+  //   위치 오차: 가운데 선을 바퀴 축 높이까지 이어서, 로봇보다 오른쪽에 얼마나 있는지
+  double steer_to(const Line & center, int rows, int cols) const
+  {
+    const double robot_x = bev_center_x_ * cols;
+    const double bottom_y = rows - 1;
+    const double center_at_axle = center.x_at(bottom_y) + center.b * robot_y_offset_px_;
     const double offset_right = center_at_axle - robot_x;
-    const double w = heading_gain_ * line->lean_left() -
+    const double w = heading_gain_ * center.lean_left() -
       offset_gain_ * std::atan2(offset_right, offset_soft_px_);
-    drive(approach_speed_, std::clamp(w, -max_angular_, max_angular_));
+    return std::clamp(w, -max_angular_, max_angular_);
   }
 
   // 왼쪽 아래 칸의 노란 점 개수로 "입구 반대쪽 모서리가 화면 맨 아래에 닿았는지" 판단
@@ -485,7 +507,7 @@ private:
     const double lean = (lean_l + lean_r) / 2.0;   // + 면 더 왼쪽으로
     if (std::abs(lean_l) <= aligned && std::abs(lean_r) <= aligned)
     {
-      finish(lean);
+      start_stem(lean);
       return;
     }
     double w = turn_kp_ * lean;
@@ -493,15 +515,82 @@ private:
     drive(0.0, w);
   }
 
+  // ==================== (4) STEM: 두 노란선 가운데로 길 올라가기 ====================
+
+  void start_stem(double lean)
+  {
+    state_ = State::STEM;
+    state_time_ = 0.0;
+    lines_missing_ = 0;
+    RCLCPP_INFO(get_logger(), "입구 길을 똑바로 봄 (남은 기울기 %.1f도) -> 두 노란선 가운데로 올라감",
+      lean * 180.0 / M_PI);
+  }
+
+  // 왼쪽/오른쪽 노란선을 잇고 그 가운데를 따라간다.
+  //   둘 다 보이고 간격이 길 폭 정도 -> 두 선의 가운데
+  //   하나만 보임                      -> 그 선에서 차선 폭 절반만큼 안쪽
+  //   둘 다 안 보임이 연속              -> 길 끝 (주차장 입구) -> 멈춤
+  void drive_between_yellow(const cv::Mat & yellow)
+  {
+    const int mid = static_cast<int>(bev_center_x_ * yellow.cols);
+    std::optional<Line> left = fit_line(yellow, 0, mid, yellow.rows);
+    std::optional<Line> right = fit_line(yellow, mid, yellow.cols, yellow.rows);
+
+    // 두 선 간격이 길 폭과 너무 다르면 (잘못 찾은 선) 둘 다 믿지 않고 직진
+    const double bottom_y = yellow.rows - 1;
+    if (left && right)
+    {
+      const double gap = right->x_at(bottom_y) - left->x_at(bottom_y);
+      if (gap < pair_gap_min_px_ || gap > pair_gap_max_px_)
+      {
+        left.reset();
+        right.reset();
+        drive(stem_speed_, 0.0);
+        return;
+      }
+    }
+
+    if (!left && !right)
+    {
+      lines_missing_++;
+      if (lines_missing_ >= stem_end_frames_ && state_time_ >= stem_min_time_)
+      {
+        finish();
+        return;
+      }
+      drive(stem_speed_, 0.0);     // 잠깐 안 보이면 직진
+      return;
+    }
+    lines_missing_ = 0;
+
+    Line center;
+    if (left && right)
+    {
+      center.a = (left->a + right->a) / 2.0;
+      center.b = (left->b + right->b) / 2.0;
+    }
+    else if (left)
+    {
+      center = *left;
+      center.a += lane_width_px_ / 2.0;
+    }
+    else
+    {
+      center = *right;
+      center.a -= lane_width_px_ / 2.0;
+    }
+    drive(stem_speed_, steer_to(center, yellow.rows, yellow.cols));
+  }
+
   // ==================== 끝내기 ====================
 
-  void finish(double lean)
+  void finish()
   {
     stop_wheels();
     state_ = State::DONE;
-    publish_mode(ControlMode::STOP, "at_entrance");
-    RCLCPP_INFO(get_logger(), "입구 길을 똑바로 봄 (남은 기울기 %.1f도) -> 정지 (다음 단계는 아직 없음)",
-      lean * 180.0 / M_PI);
+    publish_mode(ControlMode::STOP, "stem_end");
+    RCLCPP_INFO(get_logger(), "노란선이 끝남 (주차장 입구, %.1f초 올라감) -> 정지 (다음 단계는 아직 없음)",
+      state_time_);
   }
 
   void give_up(const char * reason)
@@ -521,8 +610,7 @@ private:
     }
 
     // lane_follower 가 멈춰 있도록 "주차 중" 을 계속 알린다
-    publish_mode(ControlMode::PARKING, state_ == State::APPROACH ? "approach" :
-      (state_ == State::EXTRA ? "extra" : "turn"));
+    publish_mode(ControlMode::PARKING, state_name());
 
     state_time_ += 0.1;
     if (state_ == State::EXTRA && state_time_ >= extra_time_)
@@ -540,6 +628,11 @@ private:
       give_up("입구 길이 똑바로 안 보임 (turn_timeout)");
       return;
     }
+    if (state_ == State::STEM && stem_timeout_ > 0.0 && state_time_ >= stem_timeout_)
+    {
+      give_up("길 끝을 못 찾음 (stem_timeout)");
+      return;
+    }
 
     // 영상이 끊기면 멈춤
     if ((now() - last_image_time_).seconds() > image_timeout_)
@@ -553,7 +646,26 @@ private:
 
   bool i_am_driving() const
   {
-    return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN;
+    return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN ||
+           state_ == State::STEM;
+  }
+
+  // GUI 에 보일 단계 이름
+  const char * state_name() const
+  {
+    switch (state_)
+    {
+      case State::APPROACH:
+        return "approach";
+      case State::EXTRA:
+        return "extra";
+      case State::TURN:
+        return "turn";
+      case State::STEM:
+        return "stem";
+      default:
+        return "-";
+    }
   }
 
   // 바퀴 명령. 앞으로 갈 때 앞이 막혔으면 멈춤
@@ -634,6 +746,10 @@ private:
   double pair_gap_max_px_;
   double turn_min_time_;
   int64_t turn_fit_rows_;
+  double stem_speed_;
+  int64_t stem_end_frames_;
+  double stem_min_time_;
+  double stem_timeout_;
   double front_stop_distance_;
   double image_timeout_;
   double approach_timeout_;
@@ -646,6 +762,7 @@ private:
   int64_t sign_hits_ = 0;
   double state_time_ = 0.0;        // 지금 단계에 들어온 뒤 지난 시간 [s]
   double extra_time_ = 0.0;        // EXTRA 단계에서 더 직진할 시간 [s]
+  int64_t lines_missing_ = 0;      // STEM 에서 노란선이 둘 다 연속으로 안 보인 프레임 수
   rclcpp::Time last_image_time_;
   interfaces::msg::PsdArray psd_;
   bool psd_received_ = false;

@@ -35,7 +35,8 @@ parking:
     present_pixels: 80              # 이 이상이면 "노란선 있음"
     empty_pixels: 15                # 이 이하면 "노란선 없음"
     gap_frames_needed: 2            # 연속 이만큼 프레임
-    extra_forward_m: 0.0            # [m] 돌기 전 더 갈 거리 (늦게 돌면 -, 일찍 돌면 +). 자동 계산한 거리에 더해짐
+    extra_forward_m: 0.02           # [m] 돌기 전 더 갈 거리 (늦게 돌면 -, 일찍 돌면 +). 자동 계산한 거리에 더해짐
+                                    #   실제 시험에서 조금 일찍 돌아서 +2cm. 아직 일찍이면 0.03, 0.04 ...
 
     # 5) 회전: 입구 길의 두 노란선이 화면에 세로로 똑바로 보일 때까지 왼쪽으로
     turn_speed: 0.4                 # [rad/s]
@@ -47,6 +48,12 @@ parking:
     pair_gap_max_px: 380.0
     turn_min_time: 1.0              # [s] 돌기 시작하고 이 시간 전에는 안 멈춤
     turn_fit_rows: 230              # 화면 위쪽 이 줄까지만 봄 (아래쪽은 입구의 둥근 모서리)
+
+    # 6) 주차장 길 올라가기: 양쪽 노란선 가운데로 (흰선 안 봄). 노란선이 끝나면 멈춤
+    stem_speed: 0.06                # [m/s]
+    stem_end_frames: 3              # 노란선이 둘 다 연속 이만큼 안 보이면 길 끝
+    stem_min_time: 2.0              # [s] 올라가기 시작하고 이 시간 전에는 길 끝으로 안 봄
+    stem_timeout: 20.0              # [s]
 
     # 안전
     front_stop_distance: 0.10       # [m]
