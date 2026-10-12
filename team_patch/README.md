@@ -110,3 +110,21 @@ python3 ~/turrlebot/team_patch/odom_test.py show          # 움직이지 않고 
 ```
 
 틀리면 `colcon_ws/src/stm/config/stm_bridge.yaml` 의 `wheel_radius`(거리), `wheel_separation`(각도) 를 고친다.
+
+## 주차 1~2단계 (hybrid-drive 기준): parking_odom.patch
+
+팀원 `hybrid-drive` 브랜치(bac29d1, 카메라 재보정 + odom)에 적용한다.
+주차 표지판 -> BEV 왼쪽 가로 노란선으로 입구 찾기 -> odom 으로 입구 가운데까지 직진 -> 도로 기준 왼쪽 90도 -> STOP.
+(다음 단계 - 길 올라가기, 빈 칸 고르기, 주차 - 는 아직 없음)
+
+| 파일 | 내용 |
+|---|---|
+| `lane_follower/src/parking_node.cpp` | 새 주차 노드 |
+| `lane_follower/config/parking.yaml` | 파라미터 (BEV: 바퀴 축 앞 14.1cm, 차선 폭 295px) |
+| `lane_follower/launch/parking.launch.py` | 주차 노드만 실행 (`skip_sign:=true` 면 표지판 없이 시험) |
+| `lane_follower/CMakeLists.txt`, `package.xml` | nav_msgs, cv_bridge, OpenCV 추가 |
+
+```bash
+cd ~/Robit_intelligence_turtlebot_team
+git apply ~/turrlebot/team_patch/parking_odom.patch
+```
