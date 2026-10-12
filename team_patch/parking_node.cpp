@@ -37,6 +37,8 @@
 //          ▼
 //   (5) DONE     : 멈추고 control_mode = STOP ("parking_node:stem_end")
 //                  (다음 단계 - 빈 칸 고르기, 주차 - 는 아직 없음)
+//          │  GUI 에서 LANE 을 누르면 (1) WAITING 으로 돌아가 다음 바퀴에 다시 주차한다
+//          │  (skip_sign 이면 바로 (2) APPROACH 부터)
 //
 // [위에서 본 영상(BEV)]  400 x 400 px, 1px = 1mm. 화면 맨 아래 = 바퀴 축 17.9cm 앞 (2026-10-13 카메라 각도)
 //
@@ -252,18 +254,39 @@ private:
     }
   }
 
-  // GUI 에서 STOP / MANUAL 을 누르면 그만둔다
+  // GUI 버튼
+  //   STOP / MANUAL : 주차 중이면 멈추고 그만둔다
+  //   LANE          : 주차가 끝났거나 그만둔 상태면 처음(표지판 기다리기)으로 돌아간다
   void on_mode(const ControlMode & msg)
   {
-    if (msg.mission_state.rfind(MY_TAG, 0) == 0)
+    if (msg.mission_state != "turtle_gui")
     {
-      return;                    // 내가 보낸 것
+      return;                    // GUI 가 보낸 것만 본다 (내가 보낸 것 등은 무시)
     }
     const bool stop_request = msg.mode == ControlMode::STOP || msg.mode == ControlMode::MANUAL;
-    if (stop_request && i_am_driving() && msg.mission_state == "turtle_gui")
+    if (stop_request && i_am_driving())
     {
       give_up("GUI 에서 STOP/MANUAL");
+      return;
     }
+    if (msg.mode == ControlMode::LANE && state_ == State::DONE)
+    {
+      reset();
+    }
+  }
+
+  // 처음 상태로 돌아가기 (다음 바퀴에 다시 주차)
+  void reset()
+  {
+    sign_hits_ = 0;
+    if (skip_sign_)
+    {
+      RCLCPP_INFO(get_logger(), "GUI LANE -> 다시 시작: skip_sign 이라 바로 입구 찾기");
+      start_approach();
+      return;
+    }
+    state_ = State::WAITING;
+    RCLCPP_INFO(get_logger(), "GUI LANE -> 다시 시작: 주차 표지판 기다림");
   }
 
   // ==================== 영상 한 장마다 ====================
