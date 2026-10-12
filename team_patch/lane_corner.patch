@@ -1,0 +1,39 @@
+diff --git a/colcon_ws/src/vision/lane_detection/config/lane_detection.yaml b/colcon_ws/src/vision/lane_detection/config/lane_detection.yaml
+index dbb076f..110218f 100644
+--- a/colcon_ws/src/vision/lane_detection/config/lane_detection.yaml
++++ b/colcon_ws/src/vision/lane_detection/config/lane_detection.yaml
+@@ -11,6 +11,8 @@ lane_detection:
+     # 2~5. 차선 탐색
+     lane_width_px: 267.0      # BEV 에서 두 차선 중심 사이 폭 (bird_eye_view 보정 시 차선 간격 = BEV 폭의 2/3)
+     bev_center_x: 0.5         # BEV 에서 로봇(카메라 중심)의 가로 위치 (bird_eye_view 보정값에서 계산)
++    offset_eval_behind_px: 0.0  # offset 을 BEV 맨 아래보다 이만큼 [px] 뒤(로봇 쪽)에서 잼 (0 = 기존)
++                                # 커브에서 인코스로 파고들면 150 -> 250 -> 335(바퀴 축) 순서로 키워 보기
+     base_min_pixels: 30       # 시작점 열에 필요한 최소 픽셀 수
+     n_windows: 10
+     window_margin: 30         # 윈도우 반폭 / 직전 곡선 주변 탐색 폭 [px]
+diff --git a/colcon_ws/src/vision/lane_detection/src/lane_detection_node.cpp b/colcon_ws/src/vision/lane_detection/src/lane_detection_node.cpp
+index d3e7adb..22b46db 100644
+--- a/colcon_ws/src/vision/lane_detection/src/lane_detection_node.cpp
++++ b/colcon_ws/src/vision/lane_detection/src/lane_detection_node.cpp
+@@ -129,6 +129,10 @@ public:
+     // 2~5. 차선 탐색
+     declare_parameter("lane_width_px", 267.0);     // BEV 에서 두 차선 중심 사이 폭 (bird_eye_view 보정값)
+     declare_parameter("bev_center_x", 0.5);        // BEV 에서 로봇(카메라 중심)의 가로 위치 (폭 비율)
++    // offset 을 잴 높이: BEV 맨 아래보다 이만큼 [px] 아래(= 로봇 쪽)로 곡선을 늘려서 잰다.
++    //   0 = BEV 맨 아래 (기존). 바퀴 축은 맨 아래보다 약 335px 뒤 (path_planner robot_y_offset_px)
++    //   커브에서 앞 지점을 차선 가운데에 맞추면 안쪽으로 파고드므로, 키울수록 로봇 위치 기준이 된다
++    declare_parameter("offset_eval_behind_px", 0.0);
+     declare_parameter("base_min_pixels", 30);      // 시작점 열에 필요한 최소 픽셀 수
+     declare_parameter("n_windows", 10);
+     declare_parameter("window_margin", 30);        // 윈도우 반폭 / 직전 곡선 주변 탐색 폭 [px]
+@@ -325,8 +329,9 @@ private:
+     lane.right_detected = right_.fit.has_value() && right_.miss == 0;
+     if (center) {
+       // 로봇 바로 앞(맨 아래 줄)에서 차선 중심이 로봇보다 얼마나 옆에 있는지, 반 차선 폭 = 1 로 정규화
++      const double y_eval = y_bot + dblParam("offset_eval_behind_px");
+       lane.offset = static_cast<float>(
+-        std::clamp((center->x(y_bot) - robot_x) / (lane_w / 2), -1.0, 1.0));
++        std::clamp((center->x(y_eval) - robot_x) / (lane_w / 2), -1.0, 1.0));
+       // 위로(y 감소) 갈 때 x 가 늘면 오른쪽: dx/d(-y) = -dx/dy
+       lane.angle = static_cast<float>(std::atan(-center->dxdy(y_bot)));
+     }

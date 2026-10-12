@@ -53,3 +53,9 @@ cd ~/team                     # 젯슨: ~/Robit_intelligence_turtlebot_team
 git apply ~/turrlebot/team_patch/construction.patch
 cd colcon_ws && colcon build --packages-up-to lane_follower turtle_gui
 ```
+
+## lane_corner.patch - 커브에서 인코스로 파고드는 문제
+lane_detection 은 offset 을 BEV 맨 아래에서 잰다 ("로봇은 BEV 맨 아래에 있다고 본다").
+실제 바퀴 축은 그보다 약 335px(33cm) 뒤라서, 커브에서 앞 지점을 가운데에 맞추려고 미리 꺾는다.
+`offset_eval_behind_px` (기본 0 = 기존) 만큼 곡선을 로봇 쪽으로 늘려서 offset 을 잰다.
+150 -> 250 -> 335 순서로 키워 보며 맞춘다. (lane_method:=sliding 일 때만 해당)
