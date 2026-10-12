@@ -59,3 +59,24 @@ lane_detection 은 offset 을 BEV 맨 아래에서 잰다 ("로봇은 BEV 맨 �
 실제 바퀴 축은 그보다 약 335px(33cm) 뒤라서, 커브에서 앞 지점을 가운데에 맞추려고 미리 꺾는다.
 `offset_eval_behind_px` (기본 0 = 기존) 만큼 곡선을 로봇 쪽으로 늘려서 offset 을 잰다.
 150 -> 250 -> 335 순서로 키워 보며 맞춘다. (lane_method:=sliding 일 때만 해당)
+
+## 주차 v3 - TB3 AutoRace 맵 주차장 구조에 맞춤 (파일 복사 방식)
+
+아래 도로를 달리다 왼쪽에 보이는 **가로 노란선 2개**(= 주차장 가는 길) 사이로 들어간다.
+그다음 통로에서 옆 PSD 로 다른 로봇이 있는 칸을 보고, 반대쪽 칸에 주차한 뒤 나온다.
+
+| 파일 | 내용 |
+|---|---|
+| `parking_node.cpp` | 새로 작성. 카메라 영상(image_bev)으로 가로 노란선을 찾는다 |
+| `parking.yaml` | 새 파라미터 (`stem_length_m`, `spot_depth_m` 등은 실제 맵을 재서 넣기) |
+| `add_parking_vision_build.py` | CMakeLists.txt 의 parking_node 에 OpenCV / cv_bridge 연결 |
+
+적용 (젯슨, construction 까지 적용된 상태에서):
+
+```bash
+cd ~/Robit_intelligence_turtlebot_team
+cp ~/turrlebot/team_patch/parking_node.cpp colcon_ws/src/lane_follower/src/
+cp ~/turrlebot/team_patch/parking.yaml colcon_ws/src/lane_follower/config/
+python3 ~/turrlebot/team_patch/add_parking_vision_build.py .
+cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select lane_follower
+```

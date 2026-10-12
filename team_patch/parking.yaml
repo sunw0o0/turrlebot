@@ -5,31 +5,39 @@ parking:
     #   true : control_mode 는 task_planner 가 보내고, 이 노드는 parking_active / parking_done 만 알린다
     use_task_planner: false
 
-    # 1) 주차 표지판 인식 -> 주차 구역 모드 시작
+    # 1) 주차 표지판 인식 -> 주차장 가는 길 찾기 시작
     min_confidence: 0.5             # YOLO 신뢰도가 이보다 낮으면 무시
     sign_area_ratio_threshold: 0.0  # 표지판 크기 / 화면 크기. 이보다 커야 시작 (0 = 크기 상관없음)
-                                    #   너무 멀리서 시작하면 0.02 ~ 0.03 으로 올리기
     sign_hits_needed: 1             # 연속으로 이만큼 봐야 시작 (1 = 한 번만 보여도 바로)
                                     #   construction.yaml 의 parking_sign_* 와 같은 값으로 맞출 것
 
-    # 2) 주차 구역 들어감 / 끝 (오른쪽 흰선)
-    wait_white_lost: false          # true = 오른쪽 흰선이 사라진 뒤부터 PSD 확인, false = 표지판 보자마자
-    lane_frames_needed: 5           # 오른쪽 흰선이 연속 이만큼 안 보이면 "구역 안", 다시 보이면 "구역 끝"
-    zone_timeout: 40.0              # [s] 구역 모드가 이보다 길면 그냥 끝냄 (흰선을 못 찾을 때 대비)
+    # 2) 가로 노란선 2개 (= 주차장 가는 길) 찾기. 위에서 본 영상(BEV) 400x400, 1px ≈ 1mm
+    image_topic: image_bev
+    yellow_l_min: 80                # 노란색 범위 (construction.yaml 과 같은 값)
+    yellow_b_min: 150
+    yellow_a_max: 135
+    bev_center_x: 0.5               # 로봇 가로 위치 (화면 폭 비율). 이보다 왼쪽에서만 찾는다
+    robot_y_offset_px: 335.0        # 바퀴 축이 화면 맨 아래보다 뒤에 있는 거리 [px]
+    bev_m_per_px: 0.001             # 1px 이 몇 m 인지
+    hline_min_pixels: 35            # 한 줄에 노란 점이 이만큼 이상이면 "가로선" 줄
+                                    #   (세로 차선은 한 줄에 15~20개. 가로선을 못 찾으면 줄이기)
+    hline_min_rows: 3               # 가로선 두께가 이 줄 수보다 얇으면 잡음
+    stem_gap_min_px: 120            # 두 가로선 사이 간격 [px] 이 이 범위여야 "길" 로 본다
+    stem_gap_max_px: 380
+    stem_hits_needed: 2             # 연속 이만큼 프레임에서 보여야 시작
+    approach_timeout: 40.0          # [s] 표지판 본 뒤 이 시간 안에 길을 못 찾으면 주차 포기 (0 = 끔)
 
-    # 3) 장애물 칸 찾기 (옆 PSD)
-    side_psd_threshold: 0.20        # [m] 왼쪽/오른쪽 PSD 가 이 이하면 그쪽 칸에 장애물
-    side_psd_hits_needed: 3         # 연속 이만큼 (잡음 걸러내기)
-
-    # 4) 주차 동작
-    linear_speed: 0.08              # [m/s] 전진 속도
+    # 3) 주차 동작 (속도 x 시간으로 움직인다. 거리는 실제 맵을 줄자로 재서 넣기!)
+    linear_speed: 0.08              # [m/s] 직진/후진 속도
     angular_speed: 0.6              # [rad/s] 회전 속도 (90도 = 약 2.6초)
-    align_time: 0.0                 # [s] 돌기 전에 칸 가운데까지 더 갈 시간 (0 = 바로 돎)
-    enter_time: 2.0                 # [s] 칸 안으로 전진하는 시간
+                                    #   90도보다 덜 돌면 줄이고(실제로 덜 돌았으니 더 오래), 더 돌면 키우기
+    align_extra_m: 0.0              # [m] 왼쪽으로 돌기 전 더 갈 거리 (+ 늦게 돎, - 일찍 돎)
+    stem_length_m: 0.80             # [m] 아래 도로 차선 가운데 ~ 주차장 통로 가운데 (올라갈 때, 내려올 때 같은 값)
+    spot_depth_m: 0.25              # [m] 통로 가운데 ~ 주차칸 가운데 (들어간 만큼 후진으로 나온다)
+    check_time: 1.0                 # [s] 통로에서 멈춰 옆 PSD 를 모으는 시간
+    side_psd_threshold: 0.30        # [m] 옆 PSD 평균이 이 이하면 그쪽 칸에 로봇이 있음
+    default_side: right             # 어느 칸이 빈지 모를 때 주차할 쪽 (left / right)
     park_wait_time: 2.0             # [s] 칸 안에서 서 있는 시간
-    exit_front_distance: 0.30       # [m] 나올 때 앞 PSD 가 이 이하가 되면 멈추고 돌기
-                                    #     (건너편 칸 장애물까지 거리. PSD 는 0.8m 까지만 잼)
-    exit_timeout: 4.0               # [s] 나올 때 위 조건이 안 돼도 이 시간이 지나면 돌기
 
     # 안전
     front_stop_distance: 0.10       # [m] 전진 중 정면 PSD 가 이보다 가까우면 대기 (0 = 끔)
