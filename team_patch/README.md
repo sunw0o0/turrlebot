@@ -128,3 +128,21 @@ python3 ~/turrlebot/team_patch/odom_test.py show          # 움직이지 않고 
 cd ~/Robit_intelligence_turtlebot_team
 git apply ~/turrlebot/team_patch/parking_odom.patch
 ```
+
+### 브랜치를 안 바꾸고 main 에서 쓰기 (빠른 방법)
+
+0단계에서 stm 폴더를 hybrid-drive 에서 가져왔다면, 카메라 보정만 더 가져오고 3개 패키지만 빌드한다.
+
+```bash
+cd ~/turrlebot && git pull
+cd ~/Robit_intelligence_turtlebot_team
+git checkout origin/hybrid-drive -- colcon_ws/src/vision/bird_eye_view          # 카메라 재설치 후 BEV 보정
+sed -i 's/lane_width_px: 267.0/lane_width_px: 295.0/' colcon_ws/src/vision/lane_detection/config/lane_detection.yaml
+cp ~/turrlebot/team_patch/parking_node.cpp colcon_ws/src/lane_follower/src/
+cp ~/turrlebot/team_patch/parking.yaml colcon_ws/src/lane_follower/config/
+python3 ~/turrlebot/team_patch/add_parking_odom_build.py .
+cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select bird_eye_view lane_detection lane_follower
+```
+
+main 의 lane_follower.launch.py 가 parking_node 를 같이 띄우므로 manual_bringup 만 켜면 된다.
+표지판 없이 시험할 때는 `parking.yaml` 의 `skip_sign: true` 로 바꾸고 lane_follower 만 다시 빌드.
