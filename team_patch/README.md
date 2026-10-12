@@ -146,3 +146,16 @@ cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-se
 
 main 의 lane_follower.launch.py 가 parking_node 를 같이 띄우므로 manual_bringup 만 켜면 된다.
 표지판 없이 시험할 때는 `parking.yaml` 의 `skip_sign: true` 로 바꾸고 lane_follower 만 다시 빌드.
+
+### 주차 1~2단계 카메라 버전 (엔코더 안 씀)
+
+표지판(가까이) -> 오른쪽 흰선만 보고 직진 -> 왼쪽 아래 노란선이 끊겼다가(입구) 다시 보이면(반대쪽 모서리)
+-> 제자리 왼쪽 회전 -> 입구 길의 두 노란선이 세로로 똑바로 보이면 STOP.
+
+```bash
+cd ~/turrlebot && git pull
+cd ~/Robit_intelligence_turtlebot_team
+cp ~/turrlebot/team_patch/parking_node.cpp colcon_ws/src/lane_follower/src/
+cp ~/turrlebot/team_patch/parking.yaml colcon_ws/src/lane_follower/config/
+cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select lane_follower
+```
