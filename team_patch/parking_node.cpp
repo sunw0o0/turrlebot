@@ -206,7 +206,7 @@ private:
     present_pixels_ = declare_parameter("present_pixels", 80);
     empty_pixels_ = declare_parameter("empty_pixels", 15);
     gap_frames_needed_ = declare_parameter("gap_frames_needed", 2);
-    extra_forward_m_ = declare_parameter("extra_forward_m", 0.02);
+    extra_forward_m_ = declare_parameter("extra_forward_m", -0.02);
 
     // 5) 회전
     turn_speed_ = declare_parameter("turn_speed", 0.4);
