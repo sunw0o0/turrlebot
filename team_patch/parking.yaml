@@ -1,57 +1,35 @@
 parking:
   ros__parameters:
     # task_planner 를 같이 쓰는지 (launch 파일이 task_planner 인자에 맞춰 정한다)
-    #   false: 이 노드가 control_mode 를 직접 PARKING / LANE 으로 바꾼다
-    #   true : control_mode 는 task_planner 가 보내고, 이 노드는 parking_active / parking_done 만 알린다
+    #   false: 이 노드가 control_mode 를 직접 PARKING 으로 바꾼다
+    #   true : control_mode 는 task_planner 가 보내고, 이 노드는 parking_active 만 알린다
     use_task_planner: false
 
-    # 1) 주차 표지판 인식 -> 가로 노란선 찾기 시작
+    # 1) 주차 표지판 인식 -> 주차 모드 (노란선만 따라가기)
     min_confidence: 0.5             # YOLO 신뢰도가 이보다 낮으면 무시
     sign_area_ratio_threshold: 0.0  # 표지판 크기 / 화면 크기. 이보다 커야 시작 (0 = 크기 상관없음)
     sign_hits_needed: 1             # 연속으로 이만큼 봐야 시작 (1 = 한 번만 보여도 바로)
                                     #   construction.yaml 의 parking_sign_* 와 같은 값으로 맞출 것
 
-    # 2) 영상 / 노란선. 위에서 본 영상(BEV) 400x400, 1px ≈ 1mm
+    # 2) 노란선 찾기. 위에서 본 영상(BEV) 400x400, 1px ≈ 1mm. 흰선은 아예 안 찾는다
     image_topic: image_bev
     yellow_l_min: 80                # 노란색 범위 (construction.yaml 과 같은 값)
     yellow_b_min: 150
     yellow_a_max: 135
-    bev_center_x: 0.5               # 로봇 가로 위치 (화면 폭 비율). 이보다 왼쪽에서만 노란선을 본다
+    bev_center_x: 0.5               # 로봇 가로 위치 (화면 폭 비율). 이보다 왼쪽 = 왼쪽 선, 오른쪽 = 오른쪽 선
     robot_y_offset_px: 335.0        # 바퀴 축이 화면 맨 아래보다 뒤에 있는 거리 [px]
-    bev_m_per_px: 0.001             # 1px 이 몇 m 인지
-    lane_width_px: 267.0            # 차선 폭 [px]. 노란선에서 이 절반만큼 오른쪽 = 길 가운데
-    hline_min_pixels: 35            # 한 줄에 노란 점이 이만큼 이상이면 "가로선" 줄
-                                    #   (세로 차선은 한 줄에 15~20개. 가로선을 못 찾으면 줄이기)
-    hline_min_rows: 3               # 가로선 두께가 이 줄 수보다 얇으면 잡음
-    hline_hits_needed: 2            # 연속 이만큼 프레임에서 보여야 왼쪽으로 들어가기 시작
-    approach_timeout: 40.0          # [s] 표지판 본 뒤 이 시간 안에 가로선을 못 찾으면 주차 포기 (0 = 끔)
+    lane_width_px: 267.0            # 차선 폭 [px]. 노란선이 한쪽만 보이면 이 절반만큼 떨어진 곳을 가운데로 본다
+    hline_min_pixels: 35            # 한 줄에 노란 점이 이만큼 이상이면 가로로 누운 선 -> 위치 잴 때 뺀다
+    line_min_rows: 20               # 노란 점이 있는 줄이 이보다 적으면 "선 없음"
+    min_pair_gap_px: 150.0          # 왼쪽/오른쪽 선이 이보다 가까우면 가운데 걸친 선 하나로 본다
+    initial_side: left              # 처음에 노란선이 어느 쪽에 있다고 볼지 (left / right)
 
-    # 3) 왼쪽 노란선 따라 주차장 길 올라가기 (오른쪽 흰선/노란선은 안 봄)
-    follow_speed: 0.06              # [m/s]
-    follow_ref_ratio: 0.6           # 노란선 위치를 잴 높이 (0 화면 위 ~ 1 화면 아래)
-    line_band_px: 20                # 그 높이 위아래로 이만큼 줄을 본다
-    line_min_pixels: 30             # 노란 점이 이보다 적으면 "노란선 없음"
-    steer_gain: 1.5                 # 목표 방향 각도 -> 회전 속도 (흔들리면 줄이기)
+    # 3) 운전
+    speed: 0.07                     # [m/s]
+    heading_gain: 1.0               # 차선 방향 오차 -> 회전 (커브에서 늦게 돌면 키우기)
+    offset_gain: 1.0                # 차선 가운데에서 벗어난 거리 -> 회전 (가운데로 늦게 오면 키우기)
+    offset_soft_px: 300.0           # 위치 오차를 각도로 바꿀 때 쓰는 거리 (작을수록 세게 돎)
     max_angular: 1.0                # [rad/s]
-    yellow_end_frames: 3            # 노란선이 연속 이만큼 안 보이면 "노란선 끝 = 주차장 입구"
-    follow_min_time: 2.0            # [s] 따라가기 시작하고 이 시간 전에는 끝으로 안 봄 (돌자마자 오판 방지)
-    follow_timeout: 20.0            # [s] 이 시간 안에 노란선 끝을 못 찾으면 멈추고 포기 (0 = 끔)
-    image_timeout: 0.5              # [s] 따라가기 중 영상이 이 시간 동안 안 오면 정지
-
-    # 4) 주차 동작 (속도 x 시간으로 움직인다)
-    linear_speed: 0.08              # [m/s] 직진/후진 속도
-    angular_speed: 0.6              # [rad/s] 회전 속도 (90도 = 약 2.6초)
-                                    #   90도보다 덜 돌면 줄이고(실제로 덜 돌았으니 더 오래), 더 돌면 키우기
-    align_extra_m: 0.0              # [m] 왼쪽으로 돌기 전 더 갈 거리 (+ 늦게 돎, - 일찍 돎)
-    lot_extra_m: 0.25               # [m] 노란선이 끝나는 곳 ~ 주차장 통로 가운데 (줄자로 재기)
-    spot_depth_m: 0.25              # [m] 통로 가운데 ~ 주차칸 가운데 (들어간 만큼 후진으로 나온다)
-    check_time: 1.0                 # [s] 통로에서 멈춰 옆 PSD 를 모으는 시간
-    side_psd_threshold: 0.30        # [m] 옆 PSD 평균이 이 이하면 그쪽 칸에 로봇이 있음
-    default_side: right             # 어느 칸이 빈지 모를 때 주차할 쪽 (left / right)
-    park_wait_time: 2.0             # [s] 칸 안에서 서 있는 시간
-    down_stem_m: 0.0                # [m] 나올 때 도로까지 갈 거리. 0 = 올라온 거리 그대로 (자동)
-    down_extra_m: 0.0               # [m] 자동일 때 더하거나 뺄 거리 (도로를 지나치면 -, 못 미치면 +)
-
-    # 안전
-    front_stop_distance: 0.10       # [m] 전진 중 정면 PSD 가 이보다 가까우면 대기 (0 = 끔)
-    control_rate: 20.0              # [Hz]
+    lost_turn: 0.3                  # [rad/s] 노란선을 놓쳤을 때 본 쪽으로 도는 속도
+    image_timeout: 0.5              # [s] 영상이 이 시간 동안 안 오면 정지
+    front_stop_distance: 0.10       # [m] 정면 PSD 가 이보다 가까우면 대기 (0 = 끔)
