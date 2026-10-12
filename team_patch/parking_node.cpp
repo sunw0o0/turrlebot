@@ -63,6 +63,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -150,6 +151,9 @@ public:
         on_mode(*msg);
       });
 
+    // ---- lane_follower 의 linear_speed 를 물어볼 때 쓴다 ----
+    lane_params_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "lane_follower");
+
     // ---- 보내는 토픽 ----
     cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
     mode_pub_ = create_publisher<ControlMode>("control_mode", 10);
@@ -194,7 +198,10 @@ private:
     flat_min_pixels_ = declare_parameter("flat_min_pixels", 35);
 
     // 3) 흰선 따라 직진
-    approach_speed_ = declare_parameter("approach_speed", 0.06);
+    // 직진 속도 [m/s]. use_lane_speed 가 true 면 주차를 시작할 때 lane_follower 의 linear_speed
+    // (GUI 선속도 슬라이더 값) 를 받아와서 그 속도로 간다. 못 받으면 drive_speed 를 쓴다
+    drive_speed_ = declare_parameter("drive_speed", 0.10);
+    use_lane_speed_ = declare_parameter("use_lane_speed", true);
     heading_gain_ = declare_parameter("heading_gain", 1.0);
     offset_gain_ = declare_parameter("offset_gain", 1.0);
     offset_soft_px_ = declare_parameter("offset_soft_px", 300.0);
@@ -222,7 +229,6 @@ private:
     turn_fit_rows_ = declare_parameter("turn_fit_rows", 230);
 
     // 6) 주차장 길 올라가기
-    stem_speed_ = declare_parameter("stem_speed", 0.06);
     stem_end_frames_ = declare_parameter("stem_end_frames", 3);
     stem_min_time_ = declare_parameter("stem_min_time", 2.0);
     stem_timeout_ = declare_parameter("stem_timeout", 20.0);
@@ -401,11 +407,34 @@ private:
 
   void start_approach()
   {
+    choose_speed();
     state_ = State::APPROACH;
     gap_ = Gap::BEFORE;
     gap_frames_ = 0;
     state_time_ = 0.0;
     last_image_time_ = now();
+  }
+
+  // 직진 속도 정하기: 우선 drive_speed 로 시작하고, lane_follower 가 답하면 그 linear_speed 로 바꾼다
+  void choose_speed()
+  {
+    speed_ = drive_speed_;
+    if (!use_lane_speed_ || !lane_params_->service_is_ready())
+    {
+      RCLCPP_INFO(get_logger(), "주차 직진 속도 %.2f m/s (drive_speed)", speed_);
+      return;
+    }
+    lane_params_->get_parameters({"linear_speed"},
+      [this](std::shared_future<std::vector<rclcpp::Parameter>> future)
+      {
+        const auto params = future.get();
+        if (!params.empty() && params[0].get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE &&
+          params[0].as_double() > 0.0)
+        {
+          speed_ = params[0].as_double();
+        }
+        RCLCPP_INFO(get_logger(), "주차 직진 속도 %.2f m/s (lane_follower 와 같게)", speed_);
+      });
   }
 
   // 오른쪽 흰선에서 차선 폭 절반만큼 왼쪽 = 차선 가운데를 따라간다. 흰선이 없으면 직진
@@ -415,13 +444,13 @@ private:
     const std::optional<Line> line = fit_line(white, mid, white.cols, white.rows);
     if (!line)
     {
-      drive(approach_speed_, 0.0);
+      drive(speed_, 0.0);
       return;
     }
 
     Line center = *line;
     center.a -= lane_width_px_ / 2.0;      // 흰선에서 차선 폭 절반만큼 왼쪽 = 차선 가운데
-    drive(approach_speed_, steer_to(center, white.rows, white.cols));
+    drive(speed_, steer_to(center, white.rows, white.cols));
   }
 
   // 차선 가운데 선(center)을 따라가는 회전 속도 [rad/s]. + 왼쪽, - 오른쪽
@@ -477,7 +506,7 @@ private:
   {
     const double to_line_px = (399.0 - watch_bottom_) + robot_y_offset_px_;
     const double extra_m = std::max(0.0, (to_line_px - lane_width_px_ / 2.0) * 0.001 + extra_forward_m_);
-    extra_time_ = extra_m / approach_speed_;
+    extra_time_ = extra_m / speed_;
     if (extra_time_ <= 0.0)
     {
       start_turn();
@@ -568,7 +597,7 @@ private:
       {
         left.reset();
         right.reset();
-        drive(stem_speed_, 0.0);
+        drive(speed_, 0.0);
         return;
       }
     }
@@ -581,7 +610,7 @@ private:
         finish();
         return;
       }
-      drive(stem_speed_, 0.0);     // 잠깐 안 보이면 직진
+      drive(speed_, 0.0);     // 잠깐 안 보이면 직진
       return;
     }
     lines_missing_ = 0;
@@ -602,7 +631,7 @@ private:
       center = *right;
       center.a -= lane_width_px_ / 2.0;
     }
-    drive(stem_speed_, steer_to(center, yellow.rows, yellow.cols));
+    drive(speed_, steer_to(center, yellow.rows, yellow.cols));
   }
 
   // ==================== 끝내기 ====================
@@ -747,7 +776,8 @@ private:
   double lane_width_px_;
   int64_t line_min_rows_;
   int64_t flat_min_pixels_;
-  double approach_speed_;
+  double drive_speed_;
+  bool use_lane_speed_;
   double heading_gain_;
   double offset_gain_;
   double offset_soft_px_;
@@ -769,7 +799,6 @@ private:
   double pair_gap_max_px_;
   double turn_min_time_;
   int64_t turn_fit_rows_;
-  double stem_speed_;
   int64_t stem_end_frames_;
   double stem_min_time_;
   double stem_timeout_;
@@ -785,6 +814,7 @@ private:
   int64_t sign_hits_ = 0;
   double state_time_ = 0.0;        // 지금 단계에 들어온 뒤 지난 시간 [s]
   double extra_time_ = 0.0;        // EXTRA 단계에서 더 직진할 시간 [s]
+  double speed_ = 0.10;            // 지금 쓰는 직진 속도 [m/s] (주차 시작할 때 정함)
   int64_t lines_missing_ = 0;      // STEM 에서 노란선이 둘 다 연속으로 안 보인 프레임 수
   rclcpp::Time last_image_time_;
   interfaces::msg::PsdArray psd_;
@@ -798,6 +828,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::Publisher<ControlMode>::SharedPtr mode_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::AsyncParametersClient::SharedPtr lane_params_;
 };
 
 int main(int argc, char ** argv)

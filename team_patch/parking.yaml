@@ -20,7 +20,8 @@ parking:
     flat_min_pixels: 35             # 한 줄에 점이 이만큼 이상이면 가로로 누운 부분 -> 선 이을 때 뺌
 
     # 3) 흰선 따라 직진 (입구 전까지. 왼쪽 노란선이 휘어도 안 따라감)
-    approach_speed: 0.06            # [m/s]
+    use_lane_speed: true            # true = 주차 시작할 때 lane_follower 의 linear_speed (GUI 선속도) 와 같은 속도로 감
+    drive_speed: 0.10               # [m/s] lane_follower 속도를 못 받거나 use_lane_speed 가 false 일 때
     heading_gain: 1.0
     offset_gain: 1.0
     offset_soft_px: 300.0
@@ -50,7 +51,6 @@ parking:
     turn_fit_rows: 230              # 화면 위쪽 이 줄까지만 봄 (아래쪽은 입구의 둥근 모서리)
 
     # 6) 주차장 길 올라가기: 양쪽 노란선 가운데로 (흰선 안 봄). 노란선이 끝나면 멈춤
-    stem_speed: 0.06                # [m/s]
     stem_end_frames: 3              # 노란선이 둘 다 연속 이만큼 안 보이면 길 끝
     stem_min_time: 2.0              # [s] 올라가기 시작하고 이 시간 전에는 길 끝으로 안 봄
     stem_timeout: 20.0              # [s]
