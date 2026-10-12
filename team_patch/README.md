@@ -62,13 +62,15 @@ lane_detection 은 offset 을 BEV 맨 아래에서 잰다 ("로봇은 BEV 맨 �
 
 ## 주차 v3 - TB3 AutoRace 맵 주차장 구조에 맞춤 (파일 복사 방식)
 
-아래 도로를 달리다 왼쪽에 보이는 **가로 노란선 2개**(= 주차장 가는 길) 사이로 들어간다.
-그다음 통로에서 옆 PSD 로 다른 로봇이 있는 칸을 보고, 반대쪽 칸에 주차한 뒤 나온다.
+주차 표지판을 본 뒤, 왼쪽에 **가로 노란선이 하나라도** 보이면 (오른쪽 흰선은 무시)
+그 노란선 쪽(왼쪽)으로 꺾어 주차장 길로 들어간다. 길에서는 **왼쪽 노란선만 따라** 올라가고,
+노란선이 끝나면 주차장 통로 가운데까지 간 뒤 옆 PSD 로 다른 로봇이 있는 칸을 보고 반대쪽 칸에 주차한다.
+나올 때는 후진 -> 90도 -> 올라온 거리만큼 내려감 -> 왼쪽 90도 -> 다시 lane_follower.
 
 | 파일 | 내용 |
 |---|---|
-| `parking_node.cpp` | 새로 작성. 카메라 영상(image_bev)으로 가로 노란선을 찾는다 |
-| `parking.yaml` | 새 파라미터 (`stem_length_m`, `spot_depth_m` 등은 실제 맵을 재서 넣기) |
+| `parking_node.cpp` | 새로 작성. 카메라 영상(image_bev)으로 가로 노란선 / 왼쪽 노란선을 본다 |
+| `parking.yaml` | 새 파라미터 (`lot_extra_m`, `spot_depth_m` 은 실제 맵을 재서 넣기) |
 | `add_parking_vision_build.py` | CMakeLists.txt 의 parking_node 에 OpenCV / cv_bridge 연결 |
 
 적용 (젯슨, construction 까지 적용된 상태에서):
