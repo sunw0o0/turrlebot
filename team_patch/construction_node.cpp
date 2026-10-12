@@ -14,7 +14,7 @@
 //          │                              단, 로봇 중심은 항상 두 차선 안쪽에 둔다
 //          │    - 장애물만 있고 차선이 없으면 : 직진
 //          │    - 장애물이 없으면       : 차선 가운데로 (차선도 없으면 직진)
-//          │  주차 표지판이 가까이 3번 연속 보이면 공사 구간 끝 (주차 노드가 이어받음)
+//          │  주차 표지판이 보이면 공사 구간 끝 (주차 노드가 같은 순간 이어받음)
 //          │  (exit_clear_time > 0 이면 장애물이 그 시간 동안 안 보여도 끝)
 //          ▼
 //   (3) FINISHED : control_mode 를 LANE 으로 돌려준다 -> 평소 자율주행
@@ -86,8 +86,8 @@ public:
     sign_area_ratio_threshold_ = declare_parameter("sign_area_ratio_threshold", 0.02);
     sign_hits_needed_ = declare_parameter("sign_hits_needed", 3);
     // 끝: 주차 표지판 (parking.yaml 의 표지판 조건과 같게)
-    parking_sign_area_ratio_threshold_ = declare_parameter("parking_sign_area_ratio_threshold", 0.03);
-    parking_sign_hits_needed_ = declare_parameter("parking_sign_hits_needed", 3);
+    parking_sign_area_ratio_threshold_ = declare_parameter("parking_sign_area_ratio_threshold", 0.0);
+    parking_sign_hits_needed_ = declare_parameter("parking_sign_hits_needed", 1);
     const auto image_topic = declare_parameter("image_topic", std::string("image_bev"));
     // 색 (lane_detection / path_planner 와 같은 실측값, OpenCV LAB)
     yellow_l_min_ = declare_parameter("yellow_l_min", 80);

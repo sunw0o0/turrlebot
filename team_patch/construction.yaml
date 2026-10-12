@@ -9,8 +9,8 @@ construction:
     sign_hits_needed: 3             # 연속으로 이만큼 봐야 시작
 
     # 끝: 주차 표지판이 보이면 공사 구간 끝 (parking.yaml 의 표지판 조건과 같게)
-    parking_sign_area_ratio_threshold: 0.03
-    parking_sign_hits_needed: 3
+    parking_sign_area_ratio_threshold: 0.0
+    parking_sign_hits_needed: 1
 
     # 2) 색 (lane_detection.yaml / path_planner.yaml 과 같은 실측값. 조명이 바뀌면 같이 맞추기)
     image_topic: image_bev

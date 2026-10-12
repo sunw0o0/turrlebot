@@ -10,7 +10,7 @@
 // [전체 흐름]
 //
 //   (1) WAITING      : 주차 표지판을 기다린다
-//          │  주차 표지판이 가까이 3번 연속 보임
+//          │  주차 표지판이 보임 (기본: 한 번만 보여도 바로 시작)
 //          ▼
 //   (2) ZONE         : 주차 구역 안. 운전은 lane_follower 가 한다 (왼쪽 노란선 따라가기)
 //          │            lane_detection 은 오른쪽에서 흰선만 찾기 때문에, 오른쪽이 노란선인
@@ -95,8 +95,10 @@ public:
     use_task_planner_ = declare_parameter("use_task_planner", false);
     // 표지판
     min_confidence_ = declare_parameter("min_confidence", 0.5);
-    sign_area_ratio_threshold_ = declare_parameter("sign_area_ratio_threshold", 0.03);
-    sign_hits_needed_ = declare_parameter("sign_hits_needed", 3);
+    sign_area_ratio_threshold_ = declare_parameter("sign_area_ratio_threshold", 0.0);
+    sign_hits_needed_ = declare_parameter("sign_hits_needed", 1);
+    // true 면 오른쪽 흰선이 사라진 뒤(= 구역 안)부터 PSD 를 본다. false 면 표지판을 보자마자 PSD 를 본다
+    wait_white_lost_ = declare_parameter("wait_white_lost", false);
     // 장애물 칸 찾기
     side_psd_threshold_ = declare_parameter("side_psd_threshold", 0.20);
     side_psd_hits_needed_ = declare_parameter("side_psd_hits_needed", 3);
@@ -170,15 +172,19 @@ private:
 
     if (state_ == State::WAITING && sign_hits_ >= sign_hits_needed_)
     {
-      RCLCPP_INFO(get_logger(), "주차 표지판 인식 -> 주차 구역 모드 (왼쪽 노란선 따라가기)");
+      RCLCPP_INFO(get_logger(), "주차 표지판 인식 (신뢰도 %.2f) -> 주차 모드 시작", sign.confidence);
       state_ = State::ZONE;
       zone_elapsed_ = 0.0;
-      inside_zone_ = false;
+      inside_zone_ = !wait_white_lost_;    // 기다리지 않으면 바로 "구역 안" 으로 본다
       parked_ = false;
       left_hits_ = 0;
       right_hits_ = 0;
       white_seen_frames_ = 0;
       white_lost_frames_ = 0;
+      if (!use_task_planner_)
+      {
+        publish_mode(ControlMode::LANE, "zone");   // GUI 에 "주차 모드" 로 보이게 (운전은 계속 lane_follower)
+      }
     }
   }
 
@@ -209,7 +215,9 @@ private:
     }
 
     // 구역 안에 있다가 오른쪽 흰선이 다시 연속으로 보임 -> 주차 구역 끝
-    if (inside_zone_ && white_seen_frames_ >= lane_frames_needed_)
+    //   표지판을 보자마자 시작한 경우(wait_white_lost = false)에는 처음부터 흰선이 보이므로,
+    //   주차를 한 뒤에만 이 조건으로 끝낸다
+    if (inside_zone_ && white_seen_frames_ >= lane_frames_needed_ && (parked_ || wait_white_lost_))
     {
       finish(parked_ ? "주차 구역 끝 (오른쪽 흰선 다시 보임)" :
         "주차 구역 끝, 하지만 주차할 칸을 못 찾음");
@@ -430,6 +438,7 @@ private:
   double min_confidence_;
   double sign_area_ratio_threshold_;
   int64_t sign_hits_needed_;
+  bool wait_white_lost_;
   double side_psd_threshold_;
   int64_t side_psd_hits_needed_;
   int64_t lane_frames_needed_;

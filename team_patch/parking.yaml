@@ -7,10 +7,13 @@ parking:
 
     # 1) 주차 표지판 인식 -> 주차 구역 모드 시작
     min_confidence: 0.5             # YOLO 신뢰도가 이보다 낮으면 무시
-    sign_area_ratio_threshold: 0.03 # 표지판 크기 / 화면 크기. 이보다 커야(= 가까워야) 시작
-    sign_hits_needed: 3             # 연속으로 이만큼 봐야 시작
+    sign_area_ratio_threshold: 0.0  # 표지판 크기 / 화면 크기. 이보다 커야 시작 (0 = 크기 상관없음)
+                                    #   너무 멀리서 시작하면 0.02 ~ 0.03 으로 올리기
+    sign_hits_needed: 1             # 연속으로 이만큼 봐야 시작 (1 = 한 번만 보여도 바로)
+                                    #   construction.yaml 의 parking_sign_* 와 같은 값으로 맞출 것
 
     # 2) 주차 구역 들어감 / 끝 (오른쪽 흰선)
+    wait_white_lost: false          # true = 오른쪽 흰선이 사라진 뒤부터 PSD 확인, false = 표지판 보자마자
     lane_frames_needed: 5           # 오른쪽 흰선이 연속 이만큼 안 보이면 "구역 안", 다시 보이면 "구역 끝"
     zone_timeout: 40.0              # [s] 구역 모드가 이보다 길면 그냥 끝냄 (흰선을 못 찾을 때 대비)
 
