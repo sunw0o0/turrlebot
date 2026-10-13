@@ -42,7 +42,7 @@ parking:
                                     #   그보다 더 일찍 돌려면 watch_bottom 을 줄이기 (10 줄 = 1cm 일찍)
 
     # 5) 회전: 입구 길의 두 노란선이 화면에 세로로 똑바로 보일 때까지 왼쪽으로
-    turn_speed: 0.4                 # [rad/s]
+    turn_speed: 0.2                 # [rad/s] (실제 시험 후 0.4 -> 0.2)
     turn_kp: 1.5
     turn_min_speed: 0.08
     aligned_deg: 1.5                # 두 선이 모두 이 각도 안이면 멈춤
@@ -59,12 +59,13 @@ parking:
     stem_min_time: 2.0              # [s] 올라가기 시작하고 이 시간 전에는 길 끝으로 안 봄
     stem_timeout: 20.0              # [s]
 
-    # 7) 주차장 길 / 통로를 올라가는 중 옆 PSD 가 가까우면 반대쪽으로 90도 돌고 멈춤
+    # 7) 주차장 길 / 통로를 올라가는 중 옆 PSD 가 가까우면 그쪽으로 40도 돌고 멈춤
     #    (도로를 달릴 때는 안 봄. 90도는 엔코더 odom 으로 실제 돈 각도를 잰다. odom 이 없으면 시간으로)
-    side_psd_threshold: 0.15        # [m] 왼쪽이 이 이하 -> 오른쪽으로, 오른쪽이 이 이하 -> 왼쪽으로
+    side_psd_threshold: 0.15        # [m] 왼쪽이 이 이하 -> 왼쪽으로, 오른쪽이 이 이하 -> 오른쪽으로
     side_hits_needed: 3             # 연속 이만큼 (PSD 20Hz -> 0.15초). 잡음 거르기
-    side_turn_deg: 90.0             # 돌 각도
-    side_turn_speed: 0.6            # [rad/s] 최대 회전 속도
+    side_turn_deg: 40.0             # 돌 각도
+    side_turn_toward: true          # true = PSD 가 가까운 쪽으로 돎, false = 반대쪽으로
+    side_turn_speed: 0.3            # [rad/s] 최대 회전 속도 (실제 시험 후 0.6 -> 0.3)
     side_turn_kp: 2.0               # 남은 각도 -> 회전 속도 (끝에서 천천히)
     side_min_speed: 0.15            # [rad/s] 끝에서 너무 느려 안 돌지 않게
     side_tolerance_deg: 1.0         # 남은 각도가 이 이하면 멈춤

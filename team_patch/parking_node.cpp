@@ -38,9 +38,10 @@
 //          │  차선(노란선 / 흰 점선)이 둘 다 연속으로 안 보임 = 통로 끝 -> (5)
 //          │
 //          │  옆 PSD 가 side_psd_threshold (0.15m) 이하로 연속 side_hits_needed 번:
-//          │    왼쪽이 가까움  -> 오른쪽으로 90도 (SIDE_TURN)
-//          │    오른쪽이 가까움 -> 왼쪽으로 90도 (SIDE_TURN)
-//          │  (90도는 엔코더 odom 으로 실제 돈 각도를 재서 멈춘다. odom 이 안 오면 "회전 속도 x 시간")
+//          │    왼쪽이 가까움  -> 왼쪽으로 side_turn_deg (40도) (SIDE_TURN)
+//          │    오른쪽이 가까움 -> 오른쪽으로 side_turn_deg (40도)
+//          │    (side_turn_toward: false 면 반대쪽으로)
+//          │  (각도는 엔코더 odom 으로 실제 돈 각도를 재서 멈춘다. odom 이 안 오면 "회전 속도 x 시간")
 //          │  돌고 나면 멈추고 STOP ("parking_node:turned_right" / "turned_left")
 //          ▼
 //   (5) DONE     : 멈추고 control_mode = STOP ("parking_node:stem_end")
@@ -253,7 +254,8 @@ private:
     // 7) 옆 PSD 가 가까우면 반대쪽으로 90도
     side_psd_threshold_ = declare_parameter("side_psd_threshold", 0.15);
     side_hits_needed_ = declare_parameter("side_hits_needed", 3);
-    side_turn_deg_ = declare_parameter("side_turn_deg", 90.0);
+    side_turn_deg_ = declare_parameter("side_turn_deg", 40.0);
+    side_turn_toward_ = declare_parameter("side_turn_toward", true);
     side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
     side_turn_kp_ = declare_parameter("side_turn_kp", 2.0);
     side_min_speed_ = declare_parameter("side_min_speed", 0.15);
@@ -669,7 +671,7 @@ private:
 
   // ==================== 옆 PSD 로 90도 돌기 ====================
 
-  // STEM 중 PSD 가 올 때마다: 한쪽 옆이 연속으로 가까우면 반대쪽으로 90도 돌기 시작
+  // STEM 중 PSD 가 올 때마다: 한쪽 옆이 연속으로 가까우면 그쪽으로 (side_turn_toward: false 면 반대쪽으로) 돌기 시작
   void check_side_psd()
   {
     if (state_ != State::STEM)
@@ -681,17 +683,17 @@ private:
     left_hits_ = (psd_.left > 0.0 && psd_.left <= side_psd_threshold_) ? left_hits_ + 1 : 0;
     right_hits_ = (psd_.right > 0.0 && psd_.right <= side_psd_threshold_) ? right_hits_ + 1 : 0;
 
+    // 감지된 쪽 (+1 왼쪽, -1 오른쪽). toward 면 그쪽으로, 아니면 반대쪽으로 돈다
+    const double toward = side_turn_toward_ ? 1.0 : -1.0;
     if (left_hits_ >= side_hits_needed_)
     {
-      RCLCPP_INFO(get_logger(), "왼쪽 PSD %.2fm (<= %.2f) -> 오른쪽으로 %.0f도", psd_.left,
-        side_psd_threshold_, side_turn_deg_);
-      start_side_turn(-1.0);
+      RCLCPP_INFO(get_logger(), "왼쪽 PSD %.2fm (<= %.2f)", psd_.left, side_psd_threshold_);
+      start_side_turn(+1.0 * toward);
     }
     else if (right_hits_ >= side_hits_needed_)
     {
-      RCLCPP_INFO(get_logger(), "오른쪽 PSD %.2fm (<= %.2f) -> 왼쪽으로 %.0f도", psd_.right,
-        side_psd_threshold_, side_turn_deg_);
-      start_side_turn(+1.0);
+      RCLCPP_INFO(get_logger(), "오른쪽 PSD %.2fm (<= %.2f)", psd_.right, side_psd_threshold_);
+      start_side_turn(-1.0 * toward);
     }
   }
 
@@ -965,6 +967,7 @@ private:
   double side_psd_threshold_;
   int64_t side_hits_needed_;
   double side_turn_deg_;
+  bool side_turn_toward_;
   double side_turn_speed_;
   double side_turn_kp_;
   double side_min_speed_;
