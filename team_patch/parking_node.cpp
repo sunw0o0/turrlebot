@@ -40,7 +40,7 @@
 //          │  옆 PSD 가 side_psd_threshold (0.15m) 이하로 연속 side_hits_needed 번:
 //          │    왼쪽이 가까움  -> 오른쪽으로 90도 (SIDE_TURN)
 //          │    오른쪽이 가까움 -> 왼쪽으로 90도 (SIDE_TURN)
-//          │  (90도는 카메라로 확인하지 않고 "회전 속도 x 시간" 으로 돈다)
+//          │  (90도는 엔코더 odom 으로 실제 돈 각도를 재서 멈춘다. odom 이 안 오면 "회전 속도 x 시간")
 //          │  돌고 나면 멈추고 STOP ("parking_node:turned_right" / "turned_left")
 //          ▼
 //   (5) DONE     : 멈추고 control_mode = STOP ("parking_node:stem_end")
@@ -81,6 +81,7 @@
 #include "interfaces/msg/control_mode.hpp"
 #include "interfaces/msg/psd_array.hpp"
 #include "interfaces/msg/sign.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 
@@ -154,6 +155,11 @@ public:
         psd_ = *msg;
         psd_received_ = true;
         check_side_psd();
+      });
+    odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+      "odom", 10, [this](nav_msgs::msg::Odometry::ConstSharedPtr msg)
+      {
+        on_odom(*msg);
       });
     mode_sub_ = create_subscription<ControlMode>(
       "control_mode", 10, [this](ControlMode::ConstSharedPtr msg)
@@ -249,6 +255,10 @@ private:
     side_hits_needed_ = declare_parameter("side_hits_needed", 3);
     side_turn_deg_ = declare_parameter("side_turn_deg", 90.0);
     side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
+    side_turn_kp_ = declare_parameter("side_turn_kp", 2.0);
+    side_min_speed_ = declare_parameter("side_min_speed", 0.15);
+    side_tolerance_deg_ = declare_parameter("side_tolerance_deg", 1.0);
+    odom_timeout_ = declare_parameter("odom_timeout", 0.5);
 
     // 안전
     front_stop_distance_ = declare_parameter("front_stop_distance", 0.10);
@@ -685,7 +695,9 @@ private:
     }
   }
 
-  // direction: +1 왼쪽, -1 오른쪽. 회전 시간 = 각도 / 회전 속도
+  // direction: +1 왼쪽, -1 오른쪽
+  //   odom 이 최근에 왔으면: odom 으로 실제 돈 각도를 재며 돈다 (정확)
+  //   아니면:               회전 시간 = 각도 / 회전 속도 만큼 돈다
   void start_side_turn(double direction)
   {
     stop_wheels();
@@ -695,22 +707,83 @@ private:
     side_turn_time_ = (side_turn_deg_ * M_PI / 180.0) / side_turn_speed_;
     left_hits_ = 0;
     right_hits_ = 0;
+    side_use_odom_ = odom_received_ && (now() - last_odom_time_).seconds() < odom_timeout_;
+    side_start_yaw_ = odom_yaw_;
+    side_turned_ = 0.0;
+    RCLCPP_INFO(get_logger(), "%s으로 %.0f도 회전 시작 (%s)", direction < 0.0 ? "오른쪽" : "왼쪽",
+      side_turn_deg_, side_use_odom_ ? "odom 으로 각도 잼" : "odom 없음 -> 시간으로");
   }
 
-  // 0.1초마다: 시간이 다 될 때까지 돌고, 다 되면 멈춤
+  // odom 이 올 때마다 (SIDE_TURN + odom 사용 중일 때): 돈 각도를 재고, 남은 각도에 맞춰 속도 조절
+  void step_side_turn_odom()
+  {
+    side_turned_ = std::abs(wrap_angle(odom_yaw_ - side_start_yaw_));
+    const double remain = side_turn_deg_ * M_PI / 180.0 - side_turned_;
+    if (remain <= side_tolerance_deg_ * M_PI / 180.0)
+    {
+      end_side_turn();
+      return;
+    }
+    // 남은 각도에 비례해서 느려진다 (지나치지 않게). 너무 느리면 안 돌아서 최소 속도
+    const double w = std::clamp(side_turn_kp_ * remain, side_min_speed_, side_turn_speed_);
+    drive(0.0, side_direction_ * w);
+  }
+
+  // 0.1초마다: odom 을 안 쓰면 시간으로 돌기. odom 을 써도 너무 오래 걸리면 (odom 끊김 등) 멈춤
   void step_side_turn()
   {
+    if (side_use_odom_)
+    {
+      if ((now() - last_odom_time_).seconds() > odom_timeout_ || state_time_ >= side_turn_time_ * 3.0)
+      {
+        stop_wheels();
+        give_up("회전 중 odom 이 끊김 / 너무 오래 걸림");
+      }
+      return;                    // 바퀴 명령은 odom 이 올 때마다 step_side_turn_odom() 이 보낸다
+    }
     if (state_time_ >= side_turn_time_)
     {
-      stop_wheels();
-      state_ = State::DONE;
-      const bool right = side_direction_ < 0.0;
-      publish_mode(ControlMode::STOP, right ? "turned_right" : "turned_left");
-      RCLCPP_INFO(get_logger(), "%s으로 %.0f도 돌았음 -> 정지 (다음 단계는 아직 없음)",
-        right ? "오른쪽" : "왼쪽", side_turn_deg_);
+      end_side_turn();
       return;
     }
     drive(0.0, side_direction_ * side_turn_speed_);
+  }
+
+  void end_side_turn()
+  {
+    stop_wheels();
+    state_ = State::DONE;
+    const bool right = side_direction_ < 0.0;
+    publish_mode(ControlMode::STOP, right ? "turned_right" : "turned_left");
+    if (side_use_odom_)
+    {
+      RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (odom) -> 정지 (다음 단계는 아직 없음)",
+        right ? "오른쪽" : "왼쪽", side_turned_ * 180.0 / M_PI);
+    }
+    else
+    {
+      RCLCPP_INFO(get_logger(), "%s으로 %.0f도 돌았음 (시간) -> 정지 (다음 단계는 아직 없음)",
+        right ? "오른쪽" : "왼쪽", side_turn_deg_);
+    }
+  }
+
+  // odom: 로봇 방향(yaw) 저장
+  void on_odom(const nav_msgs::msg::Odometry & msg)
+  {
+    const auto & q = msg.pose.pose.orientation;
+    odom_yaw_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    odom_received_ = true;
+    last_odom_time_ = now();
+    if (state_ == State::SIDE_TURN && side_use_odom_)
+    {
+      step_side_turn_odom();
+    }
+  }
+
+  // 각도를 -pi ~ pi 사이로
+  static double wrap_angle(double a)
+  {
+    return std::atan2(std::sin(a), std::cos(a));
   }
 
   // ==================== 끝내기 ====================
@@ -893,6 +966,10 @@ private:
   int64_t side_hits_needed_;
   double side_turn_deg_;
   double side_turn_speed_;
+  double side_turn_kp_;
+  double side_min_speed_;
+  double side_tolerance_deg_;
+  double odom_timeout_;
   double front_stop_distance_;
   double image_timeout_;
   double approach_timeout_;
@@ -910,7 +987,13 @@ private:
   int64_t left_hits_ = 0;          // 왼쪽 PSD 가 연속으로 가까웠던 횟수
   int64_t right_hits_ = 0;         // 오른쪽 PSD 가 연속으로 가까웠던 횟수
   double side_direction_ = 0.0;    // SIDE_TURN 방향 (+1 왼쪽, -1 오른쪽)
-  double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s]
+  double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s] (odom 없을 때)
+  bool side_use_odom_ = false;     // SIDE_TURN 을 odom 으로 재는지
+  double side_start_yaw_ = 0.0;    // SIDE_TURN 시작할 때 방향 [rad]
+  double side_turned_ = 0.0;       // 지금까지 돈 각도 [rad]
+  double odom_yaw_ = 0.0;          // odom 방향 [rad]
+  bool odom_received_ = false;
+  rclcpp::Time last_odom_time_;
   rclcpp::Time last_image_time_;
   interfaces::msg::PsdArray psd_;
   bool psd_received_ = false;
@@ -920,6 +1003,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Subscription<interfaces::msg::PsdArray>::SharedPtr psd_sub_;
   rclcpp::Subscription<ControlMode>::SharedPtr mode_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::Publisher<ControlMode>::SharedPtr mode_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
