@@ -37,10 +37,11 @@
 //          │        한쪽만 보이면 그 선에서 차선 폭 절반만큼 떨어져서 간다
 //          │  차선(노란선 / 흰 점선)이 둘 다 연속으로 안 보임 = 통로 끝 -> (5)
 //          │
-//          │  옆 PSD 가 side_psd_threshold (0.15m) 이하로 연속 side_hits_needed 번:
-//          │    왼쪽이 가까움  -> 왼쪽으로 side_turn_deg (40도) (SIDE_TURN)
-//          │    오른쪽이 가까움 -> 오른쪽으로 side_turn_deg (40도)
-//          │    (side_turn_toward: false 면 반대쪽으로)
+//          │  옆 PSD 가 side_psd_threshold (0.15m) 이하로 연속 side_hits_needed 번 = 그쪽에 장애물.
+//          │  계속 직진하다가 그쪽 PSD 가 side_clear_threshold (0.20m) 보다 멀어지면 (= 다 지나감):
+//          │    왼쪽 장애물  -> 왼쪽으로 side_turn_deg (40도) (SIDE_TURN)
+//          │    오른쪽 장애물 -> 오른쪽으로 side_turn_deg (40도)
+//          │    (side_turn_toward: false 면 반대쪽으로, side_turn_on_clear: false 면 보자마자 돈다)
 //          │  (각도는 엔코더 odom 으로 실제 돈 각도를 재서 멈춘다. odom 이 안 오면 "회전 속도 x 시간")
 //          │  돌고 나면 멈추고 STOP ("parking_node:turned_right" / "turned_left")
 //          ▼
@@ -256,6 +257,8 @@ private:
     side_hits_needed_ = declare_parameter("side_hits_needed", 3);
     side_turn_deg_ = declare_parameter("side_turn_deg", 40.0);
     side_turn_toward_ = declare_parameter("side_turn_toward", true);
+    side_turn_on_clear_ = declare_parameter("side_turn_on_clear", true);
+    side_clear_threshold_ = declare_parameter("side_clear_threshold", 0.20);
     side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
     side_turn_kp_ = declare_parameter("side_turn_kp", 2.0);
     side_min_speed_ = declare_parameter("side_min_speed", 0.15);
@@ -609,6 +612,10 @@ private:
     state_ = State::STEM;
     state_time_ = 0.0;
     lines_missing_ = 0;
+    side_seen_ = 0.0;
+    left_hits_ = 0;
+    right_hits_ = 0;
+    clear_hits_ = 0;
     RCLCPP_INFO(get_logger(), "입구 길을 똑바로 봄 (남은 기울기 %.1f도) -> 두 차선 가운데로 올라감",
       lean * 180.0 / M_PI);
   }
@@ -671,7 +678,11 @@ private:
 
   // ==================== 옆 PSD 로 90도 돌기 ====================
 
-  // STEM 중 PSD 가 올 때마다: 한쪽 옆이 연속으로 가까우면 그쪽으로 (side_turn_toward: false 면 반대쪽으로) 돌기 시작
+  // STEM 중 PSD 가 올 때마다
+  //   (1) 옆 PSD 가 side_psd_threshold 이하로 연속 side_hits_needed 번 -> 그쪽에 장애물 있음 (기억만, 계속 직진)
+  //   (2) 그 뒤 그쪽 PSD 가 side_clear_threshold 보다 멀어진 게 연속 side_hits_needed 번
+  //       -> 장애물을 다 지나감 -> 그쪽으로 (side_turn_toward: false 면 반대쪽으로) 돌기 시작
+  //   side_turn_on_clear: false 면 (1) 에서 바로 돈다
   void check_side_psd()
   {
     if (state_ != State::STEM)
@@ -680,21 +691,59 @@ private:
       right_hits_ = 0;
       return;
     }
-    left_hits_ = (psd_.left > 0.0 && psd_.left <= side_psd_threshold_) ? left_hits_ + 1 : 0;
-    right_hits_ = (psd_.right > 0.0 && psd_.right <= side_psd_threshold_) ? right_hits_ + 1 : 0;
 
-    // 감지된 쪽 (+1 왼쪽, -1 오른쪽). toward 면 그쪽으로, 아니면 반대쪽으로 돈다
+    // (1) 아직 장애물을 못 봤으면: 가까운 쪽 찾기
+    if (side_seen_ == 0.0)
+    {
+      left_hits_ = is_close(psd_.left) ? left_hits_ + 1 : 0;
+      right_hits_ = is_close(psd_.right) ? right_hits_ + 1 : 0;
+      if (left_hits_ >= side_hits_needed_)
+      {
+        side_seen_ = +1.0;
+        RCLCPP_INFO(get_logger(), "왼쪽 PSD %.2fm (<= %.2f) -> 왼쪽에 장애물", psd_.left, side_psd_threshold_);
+      }
+      else if (right_hits_ >= side_hits_needed_)
+      {
+        side_seen_ = -1.0;
+        RCLCPP_INFO(get_logger(), "오른쪽 PSD %.2fm (<= %.2f) -> 오른쪽에 장애물", psd_.right,
+          side_psd_threshold_);
+      }
+      if (side_seen_ == 0.0)
+      {
+        return;
+      }
+      clear_hits_ = 0;
+      if (side_turn_on_clear_)
+      {
+        RCLCPP_INFO(get_logger(), "장애물 옆을 지나갈 때까지 계속 직진");
+        return;
+      }
+      turn_toward_seen_side();
+      return;
+    }
+
+    // (2) 장애물을 봤으면: 그쪽 PSD 가 멀어질 때까지 기다리기
+    const double value = side_seen_ > 0.0 ? psd_.left : psd_.right;
+    clear_hits_ = (value > side_clear_threshold_) ? clear_hits_ + 1 : 0;
+    if (clear_hits_ >= side_hits_needed_)
+    {
+      RCLCPP_INFO(get_logger(), "%s PSD %.2fm (> %.2f) -> 장애물을 지나감", side_seen_ > 0.0 ? "왼쪽" : "오른쪽",
+        value, side_clear_threshold_);
+      turn_toward_seen_side();
+    }
+  }
+
+  // PSD 값이 정상(0 보다 큼)이고 side_psd_threshold 이하인지
+  bool is_close(double value) const
+  {
+    return value > 0.0 && value <= side_psd_threshold_;
+  }
+
+  // 장애물을 본 쪽으로 (toward = false 면 반대쪽으로) 돌기 시작
+  void turn_toward_seen_side()
+  {
     const double toward = side_turn_toward_ ? 1.0 : -1.0;
-    if (left_hits_ >= side_hits_needed_)
-    {
-      RCLCPP_INFO(get_logger(), "왼쪽 PSD %.2fm (<= %.2f)", psd_.left, side_psd_threshold_);
-      start_side_turn(+1.0 * toward);
-    }
-    else if (right_hits_ >= side_hits_needed_)
-    {
-      RCLCPP_INFO(get_logger(), "오른쪽 PSD %.2fm (<= %.2f)", psd_.right, side_psd_threshold_);
-      start_side_turn(-1.0 * toward);
-    }
+    start_side_turn(side_seen_ * toward);
   }
 
   // direction: +1 왼쪽, -1 오른쪽
@@ -968,6 +1017,8 @@ private:
   int64_t side_hits_needed_;
   double side_turn_deg_;
   bool side_turn_toward_;
+  bool side_turn_on_clear_;
+  double side_clear_threshold_;
   double side_turn_speed_;
   double side_turn_kp_;
   double side_min_speed_;
@@ -989,6 +1040,8 @@ private:
   int64_t lines_missing_ = 0;      // STEM 에서 차선이 둘 다 연속으로 안 보인 프레임 수
   int64_t left_hits_ = 0;          // 왼쪽 PSD 가 연속으로 가까웠던 횟수
   int64_t right_hits_ = 0;         // 오른쪽 PSD 가 연속으로 가까웠던 횟수
+  double side_seen_ = 0.0;         // 장애물을 본 쪽 (+1 왼쪽, -1 오른쪽, 0 아직 못 봄)
+  int64_t clear_hits_ = 0;         // 장애물을 본 쪽 PSD 가 연속으로 멀었던 횟수
   double side_direction_ = 0.0;    // SIDE_TURN 방향 (+1 왼쪽, -1 오른쪽)
   double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s] (odom 없을 때)
   bool side_use_odom_ = false;     // SIDE_TURN 을 odom 으로 재는지
