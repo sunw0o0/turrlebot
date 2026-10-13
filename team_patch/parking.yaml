@@ -59,6 +59,13 @@ parking:
     stem_min_time: 2.0              # [s] 올라가기 시작하고 이 시간 전에는 길 끝으로 안 봄
     stem_timeout: 20.0              # [s]
 
+    # 7) 주차장 길 / 통로를 올라가는 중 옆 PSD 가 가까우면 반대쪽으로 90도 돌고 멈춤
+    #    (도로를 달릴 때는 안 봄. 90도는 회전 속도 x 시간으로 돈다)
+    side_psd_threshold: 0.15        # [m] 왼쪽이 이 이하 -> 오른쪽으로, 오른쪽이 이 이하 -> 왼쪽으로
+    side_hits_needed: 3             # 연속 이만큼 (PSD 20Hz -> 0.15초). 잡음 거르기
+    side_turn_deg: 90.0             # 돌 각도
+    side_turn_speed: 0.6            # [rad/s] 90도 = 약 2.6초. 덜 돌면 side_turn_deg 를 키우기
+
     # 안전
     front_stop_distance: 0.10       # [m]
     image_timeout: 0.5              # [s]

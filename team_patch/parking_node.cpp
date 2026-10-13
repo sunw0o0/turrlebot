@@ -35,7 +35,13 @@
 //          │        노란선이 끝나면 같은 줄로 흰 점선(주차장 통로와 칸을 나누는 선)이 이어진다
 //          │        -> 노란선과 흰선을 둘 다 차선으로 보고 그 가운데로 계속 직진 (stem_use_white)
 //          │        한쪽만 보이면 그 선에서 차선 폭 절반만큼 떨어져서 간다
-//          │  차선(노란선 / 흰 점선)이 둘 다 연속으로 안 보임 = 통로 끝
+//          │  차선(노란선 / 흰 점선)이 둘 다 연속으로 안 보임 = 통로 끝 -> (5)
+//          │
+//          │  옆 PSD 가 side_psd_threshold (0.15m) 이하로 연속 side_hits_needed 번:
+//          │    왼쪽이 가까움  -> 오른쪽으로 90도 (SIDE_TURN)
+//          │    오른쪽이 가까움 -> 왼쪽으로 90도 (SIDE_TURN)
+//          │  (90도는 카메라로 확인하지 않고 "회전 속도 x 시간" 으로 돈다)
+//          │  돌고 나면 멈추고 STOP ("parking_node:turned_right" / "turned_left")
 //          ▼
 //   (5) DONE     : 멈추고 control_mode = STOP ("parking_node:stem_end")
 //                  (다음 단계 - 빈 칸 고르기, 주차 - 는 아직 없음)
@@ -113,6 +119,7 @@ class ParkingNode : public rclcpp::Node
     EXTRA,       // 입구 가운데까지 남은 거리만큼 더 직진 (이 노드가 운전)
     TURN,        // 입구에서 왼쪽으로 도는 중 (이 노드가 운전)
     STEM,        // 주차장 길 -> 통로를 두 차선(노란선 / 흰 점선) 가운데로 올라가는 중 (이 노드가 운전)
+    SIDE_TURN,   // 옆 PSD 가 가까워서 반대쪽으로 90도 도는 중 (이 노드가 운전)
     DONE,        // 끝 (또는 그만둠)
   };
 
@@ -146,6 +153,7 @@ public:
       {
         psd_ = *msg;
         psd_received_ = true;
+        check_side_psd();
       });
     mode_sub_ = create_subscription<ControlMode>(
       "control_mode", 10, [this](ControlMode::ConstSharedPtr msg)
@@ -235,6 +243,12 @@ private:
     stem_end_frames_ = declare_parameter("stem_end_frames", 3);
     stem_min_time_ = declare_parameter("stem_min_time", 2.0);
     stem_timeout_ = declare_parameter("stem_timeout", 20.0);
+
+    // 7) 옆 PSD 가 가까우면 반대쪽으로 90도
+    side_psd_threshold_ = declare_parameter("side_psd_threshold", 0.15);
+    side_hits_needed_ = declare_parameter("side_hits_needed", 3);
+    side_turn_deg_ = declare_parameter("side_turn_deg", 90.0);
+    side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
 
     // 안전
     front_stop_distance_ = declare_parameter("front_stop_distance", 0.10);
@@ -340,7 +354,7 @@ private:
     {
       turn_until_aligned(yellow);
     }
-    else
+    else if (state_ == State::STEM)
     {
       // 노란선 + (흰 점선). 가로로 누운 흰선(주차장 테두리)은 선을 이을 때 빠진다
       cv::Mat lines = yellow;
@@ -643,6 +657,62 @@ private:
     drive(speed_, steer_to(center, lines.rows, lines.cols));
   }
 
+  // ==================== 옆 PSD 로 90도 돌기 ====================
+
+  // STEM 중 PSD 가 올 때마다: 한쪽 옆이 연속으로 가까우면 반대쪽으로 90도 돌기 시작
+  void check_side_psd()
+  {
+    if (state_ != State::STEM)
+    {
+      left_hits_ = 0;
+      right_hits_ = 0;
+      return;
+    }
+    left_hits_ = (psd_.left > 0.0 && psd_.left <= side_psd_threshold_) ? left_hits_ + 1 : 0;
+    right_hits_ = (psd_.right > 0.0 && psd_.right <= side_psd_threshold_) ? right_hits_ + 1 : 0;
+
+    if (left_hits_ >= side_hits_needed_)
+    {
+      RCLCPP_INFO(get_logger(), "왼쪽 PSD %.2fm (<= %.2f) -> 오른쪽으로 %.0f도", psd_.left,
+        side_psd_threshold_, side_turn_deg_);
+      start_side_turn(-1.0);
+    }
+    else if (right_hits_ >= side_hits_needed_)
+    {
+      RCLCPP_INFO(get_logger(), "오른쪽 PSD %.2fm (<= %.2f) -> 왼쪽으로 %.0f도", psd_.right,
+        side_psd_threshold_, side_turn_deg_);
+      start_side_turn(+1.0);
+    }
+  }
+
+  // direction: +1 왼쪽, -1 오른쪽. 회전 시간 = 각도 / 회전 속도
+  void start_side_turn(double direction)
+  {
+    stop_wheels();
+    state_ = State::SIDE_TURN;
+    state_time_ = 0.0;
+    side_direction_ = direction;
+    side_turn_time_ = (side_turn_deg_ * M_PI / 180.0) / side_turn_speed_;
+    left_hits_ = 0;
+    right_hits_ = 0;
+  }
+
+  // 0.1초마다: 시간이 다 될 때까지 돌고, 다 되면 멈춤
+  void step_side_turn()
+  {
+    if (state_time_ >= side_turn_time_)
+    {
+      stop_wheels();
+      state_ = State::DONE;
+      const bool right = side_direction_ < 0.0;
+      publish_mode(ControlMode::STOP, right ? "turned_right" : "turned_left");
+      RCLCPP_INFO(get_logger(), "%s으로 %.0f도 돌았음 -> 정지 (다음 단계는 아직 없음)",
+        right ? "오른쪽" : "왼쪽", side_turn_deg_);
+      return;
+    }
+    drive(0.0, side_direction_ * side_turn_speed_);
+  }
+
   // ==================== 끝내기 ====================
 
   void finish()
@@ -694,6 +764,11 @@ private:
       give_up("길 끝을 못 찾음 (stem_timeout)");
       return;
     }
+    if (state_ == State::SIDE_TURN)
+    {
+      step_side_turn();          // 시간으로 도는 거라 영상이 없어도 계속
+      return;
+    }
 
     // 영상이 끊기면 멈춤
     if ((now() - last_image_time_).seconds() > image_timeout_)
@@ -708,7 +783,7 @@ private:
   bool i_am_driving() const
   {
     return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN ||
-           state_ == State::STEM;
+           state_ == State::STEM || state_ == State::SIDE_TURN;
   }
 
   // GUI 에 보일 단계 이름
@@ -724,6 +799,8 @@ private:
         return "turn";
       case State::STEM:
         return "stem";
+      case State::SIDE_TURN:
+        return side_direction_ < 0.0 ? "side_turn_right" : "side_turn_left";
       default:
         return "-";
     }
@@ -812,6 +889,10 @@ private:
   int64_t stem_end_frames_;
   double stem_min_time_;
   double stem_timeout_;
+  double side_psd_threshold_;
+  int64_t side_hits_needed_;
+  double side_turn_deg_;
+  double side_turn_speed_;
   double front_stop_distance_;
   double image_timeout_;
   double approach_timeout_;
@@ -826,6 +907,10 @@ private:
   double extra_time_ = 0.0;        // EXTRA 단계에서 더 직진할 시간 [s]
   double speed_ = 0.10;            // 지금 쓰는 직진 속도 [m/s] (주차 시작할 때 정함)
   int64_t lines_missing_ = 0;      // STEM 에서 차선이 둘 다 연속으로 안 보인 프레임 수
+  int64_t left_hits_ = 0;          // 왼쪽 PSD 가 연속으로 가까웠던 횟수
+  int64_t right_hits_ = 0;         // 오른쪽 PSD 가 연속으로 가까웠던 횟수
+  double side_direction_ = 0.0;    // SIDE_TURN 방향 (+1 왼쪽, -1 오른쪽)
+  double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s]
   rclcpp::Time last_image_time_;
   interfaces::msg::PsdArray psd_;
   bool psd_received_ = false;
