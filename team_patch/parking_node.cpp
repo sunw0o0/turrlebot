@@ -914,7 +914,7 @@ private:
     side_use_odom_ = odom_received_ && (now() - last_odom_time_).seconds() < odom_timeout_;
     side_start_yaw_ = odom_yaw_;
     side_turned_ = 0.0;
-    // 가로 흰 선을 보고 돌기 시작했으면: 그 흰 선이 기운 각도로 돈 각도를 잰다 (카메라)
+    // 가로 흰 선을 보고 돌기 시작했으면: 화면의 직선들이 돈 각도로 잰다 (카메라)
     side_use_cam_ = side_cam_ && !side_prev_angles_.empty();
     side_cam_lost_ = 0;
     side_cam_turned_ = 0.0;
@@ -1361,7 +1361,7 @@ private:
   double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s] (odom 없을 때)
   double side_turn_limit_ = 0.0;   // SIDE_TURN 최대 시간 [s] (넘으면 포기)
   bool side_use_odom_ = false;     // SIDE_TURN 을 odom 으로 재는지
-  bool side_use_cam_ = false;      // SIDE_TURN 을 카메라 (가로 흰 선 기울기) 로 재는지
+  bool side_use_cam_ = false;      // SIDE_TURN 을 카메라 (화면 직선들이 돈 각도) 로 재는지
   std::vector<double> side_prev_angles_;   // SIDE_TURN 중 바로 전 영상의 직선 방향 분포 (180칸)
   double side_cam_sum_ = 0.0;      // 카메라로 잰 돈 각도 합 (부호 있음) [rad]
   int64_t side_cam_lost_ = 0;      // 흰 선을 연속으로 못 찾은 프레임 수
