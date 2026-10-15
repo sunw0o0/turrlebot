@@ -44,7 +44,8 @@ parking:
     # 5) 회전: 입구 길의 두 노란선이 화면에 세로로 똑바로 보일 때까지 왼쪽으로
     turn_speed: 0.4                 # [rad/s] 돌기 시작할 때 (가장 빠른) 속도
     turn_min_speed: 0.08            # [rad/s] 노란선이 거의 세로일 때 (가장 느린) 속도. 너무 낮으면 모터가 안 돎
-    turn_slow_angle_deg: 45.0       # 길 노란선이 이 각도보다 덜 기울면 느려지기 시작 (세로에 가까울수록 turn_min_speed 쪽)
+    turn_slow_angle_deg: 60.0       # 길 노란선이 이 각도보다 덜 기울면 느려지기 시작 (세로에 가까울수록 turn_min_speed 쪽)
+    turn_slow_power: 2.0            # 1 = 고르게 느려짐, 2 = 세로에 가까울수록 훨씬 많이 느려짐 (클수록 더 일찍 많이 느려짐)
     aligned_deg: 1.5                # 두 선이 모두 이 각도 안이면 멈춤
     parallel_deg: 8.0               # 두 선 기울기 차이가 이보다 크면 아직 길이 아님
     pair_gap_min_px: 200.0          # 두 선 간격이 이 범위여야 길로 봄
@@ -78,4 +79,4 @@ parking:
     front_stop_distance: 0.10       # [m]
     image_timeout: 0.5              # [s]
     approach_timeout: 30.0          # [s]
-    turn_timeout: 8.0               # [s]
+    turn_timeout: 15.0              # [s] 천천히 돌게 바꿔서 8 -> 15 (시뮬레이션에서 약 8.5초 걸림)

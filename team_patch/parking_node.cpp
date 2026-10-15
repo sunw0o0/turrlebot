@@ -238,7 +238,8 @@ private:
     // 5) 회전
     turn_speed_ = declare_parameter("turn_speed", 0.4);
     turn_min_speed_ = declare_parameter("turn_min_speed", 0.08);
-    turn_slow_angle_deg_ = declare_parameter("turn_slow_angle_deg", 45.0);
+    turn_slow_angle_deg_ = declare_parameter("turn_slow_angle_deg", 60.0);
+    turn_slow_power_ = declare_parameter("turn_slow_power", 2.0);
     aligned_deg_ = declare_parameter("aligned_deg", 1.5);
     parallel_deg_ = declare_parameter("parallel_deg", 8.0);
     pair_gap_min_px_ = declare_parameter("pair_gap_min_px", 200.0);
@@ -269,7 +270,7 @@ private:
     front_stop_distance_ = declare_parameter("front_stop_distance", 0.10);
     image_timeout_ = declare_parameter("image_timeout", 0.5);
     approach_timeout_ = declare_parameter("approach_timeout", 30.0);
-    turn_timeout_ = declare_parameter("turn_timeout", 8.0);
+    turn_timeout_ = declare_parameter("turn_timeout", 15.0);
   }
 
   // ==================== 표지판 / 모드 ====================
@@ -566,11 +567,13 @@ private:
 
   // 회전 속도: 길의 노란선이 왼쪽으로 많이 기울어 있으면(아직 많이 돌아야 함) 빠르게(turn_speed),
   //   세로에 가까워질수록 느리게(turn_min_speed). turn_slow_angle_deg 보다 많이 기울면 최고 속도
+  //   ratio = 기운 각도 / turn_slow_angle_deg (0 ~ 1) 를 turn_slow_power 제곱해서 쓴다
+  //     power 1 = 각도에 비례해서 고르게 느려짐, 2 = 처음엔 조금, 세로에 가까울수록 훨씬 많이 느려짐
   //   lean: 선이 왼쪽으로 기운 각도 [rad]. 음수(오른쪽으로 기움 = 지나침)도 크기로 계산
   double turn_speed_for(double lean) const
   {
     const double ratio = std::min(1.0, std::abs(lean) / (turn_slow_angle_deg_ * M_PI / 180.0));
-    return turn_min_speed_ + (turn_speed_ - turn_min_speed_) * ratio;
+    return turn_min_speed_ + (turn_speed_ - turn_min_speed_) * std::pow(ratio, turn_slow_power_);
   }
 
   // 왼쪽으로 돌면서:
@@ -1033,6 +1036,7 @@ private:
   double turn_speed_;
   double turn_min_speed_;
   double turn_slow_angle_deg_;
+  double turn_slow_power_;
   double aligned_deg_;
   double parallel_deg_;
   double pair_gap_min_px_;
