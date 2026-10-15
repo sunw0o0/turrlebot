@@ -237,8 +237,8 @@ private:
 
     // 5) 회전
     turn_speed_ = declare_parameter("turn_speed", 0.4);
-    turn_kp_ = declare_parameter("turn_kp", 1.5);
     turn_min_speed_ = declare_parameter("turn_min_speed", 0.08);
+    turn_slow_angle_deg_ = declare_parameter("turn_slow_angle_deg", 45.0);
     aligned_deg_ = declare_parameter("aligned_deg", 1.5);
     parallel_deg_ = declare_parameter("parallel_deg", 8.0);
     pair_gap_min_px_ = declare_parameter("pair_gap_min_px", 200.0);
@@ -564,9 +564,20 @@ private:
     drive(0.0, turn_speed_);
   }
 
-  // 왼쪽/오른쪽 노란선이 둘 다 보이고, 간격이 길 폭 정도이고, 같은 쪽으로 기울어 있으면
-  // (= 같은 길의 두 선) 기운 만큼 더 돈다. 둘 다 거의 세로(aligned_deg 이내)가 되면 멈춘다.
-  // 그 전에는 turn_speed 로 계속 왼쪽으로
+  // 회전 속도: 길의 노란선이 왼쪽으로 많이 기울어 있으면(아직 많이 돌아야 함) 빠르게(turn_speed),
+  //   세로에 가까워질수록 느리게(turn_min_speed). turn_slow_angle_deg 보다 많이 기울면 최고 속도
+  //   lean: 선이 왼쪽으로 기운 각도 [rad]. 음수(오른쪽으로 기움 = 지나침)도 크기로 계산
+  double turn_speed_for(double lean) const
+  {
+    const double ratio = std::min(1.0, std::abs(lean) / (turn_slow_angle_deg_ * M_PI / 180.0));
+    return turn_min_speed_ + (turn_speed_ - turn_min_speed_) * ratio;
+  }
+
+  // 왼쪽으로 돌면서:
+  //   - 처음 turn_min_time 초는 최고 속도 (막 돌기 시작할 때 보이는 도로 노란선은 세로라서 헷갈리므로)
+  //   - 그 뒤 왼쪽으로 기운 노란선(= 길의 선, 도는 쪽에서 들어옴)이 보이면 그 기울기에 맞춰 점점 느리게
+  //   - 왼쪽/오른쪽 노란선이 둘 다 보이고, 간격이 길 폭 정도이고, 같은 쪽으로 기울어 있으면
+  //     (= 같은 길의 두 선) 둘 다 거의 세로(aligned_deg 이내)가 되면 멈춘다
   void turn_until_aligned(const cv::Mat & yellow)
   {
     // 화면 아래쪽에는 입구의 둥근 모서리가 보여서 선이 바깥으로 휘어 보인다 -> 위쪽 줄만 쓴다
@@ -580,9 +591,14 @@ private:
       right->x_at(bottom_y) - left->x_at(bottom_y) >= pair_gap_min_px_ &&
       right->x_at(bottom_y) - left->x_at(bottom_y) <= pair_gap_max_px_;
 
-    if (!pair || state_time_ < turn_min_time_)
+    if (state_time_ < turn_min_time_)
     {
       drive(0.0, turn_speed_);
+      return;
+    }
+    if (!pair)
+    {
+      drive(0.0, turn_speed_for(leaning_left(left, right)));
       return;
     }
 
@@ -591,7 +607,8 @@ private:
     const double lean_r = right->lean_left();
     if (std::abs(lean_l - lean_r) > parallel_deg_ * M_PI / 180.0)
     {
-      drive(0.0, turn_speed_);   // 두 선이 나란하지 않음 = 아직 길을 제대로 못 봄
+      // 두 선이 나란하지 않음 = 아직 길을 제대로 못 봄
+      drive(0.0, turn_speed_for(leaning_left(left, right)));
       return;
     }
     const double lean = (lean_l + lean_r) / 2.0;   // + 면 더 왼쪽으로
@@ -600,9 +617,22 @@ private:
       start_stem(lean);
       return;
     }
-    double w = turn_kp_ * lean;
-    w = std::copysign(std::clamp(std::abs(w), turn_min_speed_, turn_speed_), lean);
-    drive(0.0, w);
+    drive(0.0, std::copysign(turn_speed_for(lean), lean));   // 지나쳤으면(lean < 0) 오른쪽으로
+  }
+
+  // 보이는 노란선 중 왼쪽으로 기운 것(= 아직 더 돌아야 하는 길의 선)의 기울기 [rad].
+  // 왼쪽으로 기운 선이 없으면 아주 큰 값 (= 최고 속도)
+  static double leaning_left(const std::optional<Line> & left, const std::optional<Line> & right)
+  {
+    double lean = 10.0;
+    for (const auto & line : {left, right})
+    {
+      if (line && line->lean_left() > 0.0)
+      {
+        lean = std::min(lean, line->lean_left());
+      }
+    }
+    return lean;
   }
 
   // ==================== (4) STEM: 두 차선 가운데로 길 / 통로 올라가기 ====================
@@ -1001,8 +1031,8 @@ private:
   int64_t gap_frames_needed_;
   double extra_forward_m_;
   double turn_speed_;
-  double turn_kp_;
   double turn_min_speed_;
+  double turn_slow_angle_deg_;
   double aligned_deg_;
   double parallel_deg_;
   double pair_gap_min_px_;
