@@ -61,12 +61,12 @@ parking:
     stem_timeout: 20.0              # [s]
 
     # 7) 주차장 길 / 통로를 올라가는 중 옆 PSD 가 가까우면 (장애물) 그쪽을 기억하고 계속 가다가,
-    #    앞의 가로 흰 선이 화면에서 사라지기 직전에 그쪽으로 40도 돌고 멈춤 (장애물을 못 봤으면 그냥 멈춤)
-    #    도는 각도는 그 흰 선이 화면에서 기운 각도로 잰다 (카메라). 흰 선을 놓치면 odom, odom 도 없으면 시간
+    #    앞의 가로 흰 선이 화면에서 사라지기 직전에 그쪽으로 90도 돌고 멈춤 (장애물을 못 봤으면 그냥 멈춤)
+    #    도는 각도는 화면의 직선들이 돈 각도로 잰다 (카메라). 못 재면 odom, odom 도 없으면 시간
     #    (도로를 달릴 때는 PSD 를 안 봄)
     side_psd_threshold: 0.15        # [m] 왼쪽이 이 이하 -> 왼쪽으로, 오른쪽이 이 이하 -> 오른쪽으로
     side_hits_needed: 3             # 연속 이만큼 (PSD 20Hz -> 0.15초). 잡음 거르기
-    side_turn_deg: 40.0             # 돌 각도
+    side_turn_deg: 90.0             # 돌 각도 (90 = 가로 흰 선이 세로가 될 때까지)
     side_turn_toward: true          # true = PSD 가 가까운 쪽으로 돎, false = 반대쪽으로
     side_turn_when: white           # 언제 돌지
                                     #   white = PSD 로 본 쪽을 기억했다가, 앞의 가로 흰 선(주차장 끝)이 화면 아래에 오면
@@ -76,9 +76,10 @@ parking:
     white_arm_y: 300                # 이 줄보다 아래 있던 흰 선이 다음 영상에서 안 보여도 돎 (= 막 화면 밖으로 나감)
     white_row_min_pixels: 150       # 한 줄에 흰 점이 이만큼 이상이어야 가로 흰 선
     white_center_ratio: 0.6         # 화면 가운데 40% 구간을 이만큼 채워야 함 (입구 쪽 테두리는 가운데가 뚫려 있어 빠짐)
-    side_turn_by_camera: true       # 흰 선을 보고 돌 때, 그 흰 선이 기운 각도로 돈 각도를 잼 (false = odom)
-    side_cam_min_area: 800          # 흰 선 덩어리가 이보다 작으면 못 찾은 걸로 봄 [px]
-    side_cam_lost_frames: 5         # 흰 선을 연속 이만큼 못 찾으면 odom 으로 이어서 잼
+    side_turn_by_camera: true       # 화면의 직선(흰선/노란선)들이 돈 각도로 회전 각도를 잼 (false = odom)
+    side_cam_min_line_px: 60        # 이보다 짧은 직선 조각은 안 씀 [px]
+    side_cam_max_step_deg: 20.0     # 영상 한 장 사이에 이보다 많이 돌지는 않는다고 봄
+    side_cam_lost_frames: 5         # 직선을 연속 이만큼 못 찾으면 odom 으로 이어서 잼
     side_cam_max_extra_deg: 15.0    # 카메라로 도는 중 odom 각도가 목표 + 이 값을 넘으면 무조건 멈춤 (안전)
     side_clear_threshold: 0.20      # [m] 장애물 본 쪽 PSD 가 이보다 멀어지면 "다 지나감" (0.15 보다 조금 크게)
     side_turn_speed: 0.3            # [rad/s] 최대 회전 속도 (실제 시험 후 0.6 -> 0.3)
