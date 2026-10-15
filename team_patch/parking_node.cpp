@@ -273,8 +273,9 @@ private:
     white_arm_y_ = declare_parameter("white_arm_y", 300);
     side_clear_threshold_ = declare_parameter("side_clear_threshold", 0.20);
     side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
-    side_turn_kp_ = declare_parameter("side_turn_kp", 2.0);
-    side_min_speed_ = declare_parameter("side_min_speed", 0.15);
+    side_min_speed_ = declare_parameter("side_min_speed", 0.08);
+    side_slow_angle_deg_ = declare_parameter("side_slow_angle_deg", 30.0);
+    side_slow_power_ = declare_parameter("side_slow_power", 2.0);
     side_tolerance_deg_ = declare_parameter("side_tolerance_deg", 1.0);
     odom_timeout_ = declare_parameter("odom_timeout", 0.5);
 
@@ -898,7 +899,8 @@ private:
     state_ = State::SIDE_TURN;
     state_time_ = 0.0;
     side_direction_ = direction;
-    side_turn_time_ = (side_turn_deg_ * M_PI / 180.0) / side_turn_speed_;
+    side_turn_time_ = (side_turn_deg_ * M_PI / 180.0) / side_turn_speed_;          // odom 도 카메라도 없을 때
+    side_turn_limit_ = (side_turn_deg_ * M_PI / 180.0) / side_min_speed_ * 1.5;    // 너무 오래 걸리면 포기
     left_hits_ = 0;
     right_hits_ = 0;
     side_use_odom_ = odom_received_ && (now() - last_odom_time_).seconds() < odom_timeout_;
@@ -939,8 +941,16 @@ private:
       end_side_turn();
       return;
     }
-    const double w = std::clamp(side_turn_kp_ * remain, side_min_speed_, side_turn_speed_);
+    const double w = side_speed_for(remain);
     drive(0.0, side_direction_ * w);
+  }
+
+  // 옆 회전 속도: 남은 각도가 side_slow_angle_deg 보다 크면 최고 속도(side_turn_speed),
+  //   가까워질수록 (남은 각도 / side_slow_angle_deg) 의 side_slow_power 제곱만큼 느려져 side_min_speed 까지
+  double side_speed_for(double remain) const
+  {
+    const double ratio = std::clamp(remain / (side_slow_angle_deg_ * M_PI / 180.0), 0.0, 1.0);
+    return side_min_speed_ + (side_turn_speed_ - side_min_speed_) * std::pow(ratio, side_slow_power_);
   }
 
   // 흰색 덩어리 중 가장 큰 것(= 주차장 끝 테두리)의 기울기 [rad]. 0 = 가로, pi/2 = 세로
@@ -982,7 +992,7 @@ private:
       return;
     }
     // 남은 각도에 비례해서 느려진다 (지나치지 않게). 너무 느리면 안 돌아서 최소 속도
-    const double w = std::clamp(side_turn_kp_ * remain, side_min_speed_, side_turn_speed_);
+    const double w = side_speed_for(remain);
     drive(0.0, side_direction_ * w);
   }
 
@@ -991,7 +1001,7 @@ private:
   {
     if (side_use_cam_)
     {
-      if (state_time_ >= side_turn_time_ * 3.0)
+      if (state_time_ >= side_turn_limit_)
       {
         stop_wheels();
         give_up("카메라로 회전 중 너무 오래 걸림");
@@ -1000,7 +1010,7 @@ private:
     }
     if (side_use_odom_)
     {
-      if ((now() - last_odom_time_).seconds() > odom_timeout_ || state_time_ >= side_turn_time_ * 3.0)
+      if ((now() - last_odom_time_).seconds() > odom_timeout_ || state_time_ >= side_turn_limit_)
       {
         stop_wheels();
         give_up("회전 중 odom 이 끊김 / 너무 오래 걸림");
@@ -1262,7 +1272,8 @@ private:
   int64_t white_arm_y_;
   double side_clear_threshold_;
   double side_turn_speed_;
-  double side_turn_kp_;
+  double side_slow_angle_deg_;
+  double side_slow_power_;
   double side_min_speed_;
   double side_tolerance_deg_;
   double odom_timeout_;
@@ -1288,6 +1299,7 @@ private:
   std::optional<double> last_white_tilt_;  // 바로 전 영상에서 흰 선 기울기 [rad]
   double side_direction_ = 0.0;    // SIDE_TURN 방향 (+1 왼쪽, -1 오른쪽)
   double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s] (odom 없을 때)
+  double side_turn_limit_ = 0.0;   // SIDE_TURN 최대 시간 [s] (넘으면 포기)
   bool side_use_odom_ = false;     // SIDE_TURN 을 odom 으로 재는지
   bool side_use_cam_ = false;      // SIDE_TURN 을 카메라 (가로 흰 선 기울기) 로 재는지
   std::optional<double> side_cam_tilt0_;   // 돌기 시작할 때 흰 선 기울기 [rad]
