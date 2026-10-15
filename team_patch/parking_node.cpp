@@ -257,7 +257,7 @@ private:
     side_hits_needed_ = declare_parameter("side_hits_needed", 3);
     side_turn_deg_ = declare_parameter("side_turn_deg", 40.0);
     side_turn_toward_ = declare_parameter("side_turn_toward", true);
-    side_turn_on_clear_ = declare_parameter("side_turn_on_clear", true);
+    side_turn_on_clear_ = declare_parameter("side_turn_on_clear", false);
     side_clear_threshold_ = declare_parameter("side_clear_threshold", 0.20);
     side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
     side_turn_kp_ = declare_parameter("side_turn_kp", 2.0);

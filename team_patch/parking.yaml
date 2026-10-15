@@ -65,7 +65,7 @@ parking:
     side_hits_needed: 3             # 연속 이만큼 (PSD 20Hz -> 0.15초). 잡음 거르기
     side_turn_deg: 40.0             # 돌 각도
     side_turn_toward: true          # true = PSD 가 가까운 쪽으로 돎, false = 반대쪽으로
-    side_turn_on_clear: true        # true = 장애물을 본 뒤 계속 가다가, 그쪽 PSD 가 멀어지면(다 지나가면) 돎
+    side_turn_on_clear: false       # true = 장애물을 본 뒤 계속 가다가, 그쪽 PSD 가 멀어지면(다 지나가면) 돎
                                     # false = 보자마자 돎
     side_clear_threshold: 0.20      # [m] 장애물 본 쪽 PSD 가 이보다 멀어지면 "다 지나감" (0.15 보다 조금 크게)
     side_turn_speed: 0.3            # [rad/s] 최대 회전 속도 (실제 시험 후 0.6 -> 0.3)
