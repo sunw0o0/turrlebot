@@ -263,10 +263,10 @@ private:
     side_turn_deg_ = declare_parameter("side_turn_deg", 40.0);
     side_turn_toward_ = declare_parameter("side_turn_toward", true);
     side_turn_when_ = declare_parameter("side_turn_when", std::string("white"));
-    white_trigger_y_ = declare_parameter("white_trigger_y", 390);
+    white_trigger_y_ = declare_parameter("white_trigger_y", 350);
     side_cam_ = declare_parameter("side_turn_by_camera", true);
-    side_cam_min_area_ = declare_parameter("side_cam_min_area", 1500);
-    side_cam_lost_frames_ = declare_parameter("side_cam_lost_frames", 3);
+    side_cam_min_area_ = declare_parameter("side_cam_min_area", 800);
+    side_cam_lost_frames_ = declare_parameter("side_cam_lost_frames", 5);
     side_cam_max_extra_deg_ = declare_parameter("side_cam_max_extra_deg", 15.0);
     white_row_min_pixels_ = declare_parameter("white_row_min_pixels", 150);
     white_center_ratio_ = declare_parameter("white_center_ratio", 0.6);
