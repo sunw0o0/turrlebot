@@ -263,10 +263,14 @@ private:
     side_turn_deg_ = declare_parameter("side_turn_deg", 40.0);
     side_turn_toward_ = declare_parameter("side_turn_toward", true);
     side_turn_when_ = declare_parameter("side_turn_when", std::string("white"));
-    white_trigger_y_ = declare_parameter("white_trigger_y", 380);
+    white_trigger_y_ = declare_parameter("white_trigger_y", 390);
+    side_cam_ = declare_parameter("side_turn_by_camera", true);
+    side_cam_min_area_ = declare_parameter("side_cam_min_area", 1500);
+    side_cam_lost_frames_ = declare_parameter("side_cam_lost_frames", 3);
+    side_cam_max_extra_deg_ = declare_parameter("side_cam_max_extra_deg", 15.0);
     white_row_min_pixels_ = declare_parameter("white_row_min_pixels", 150);
     white_center_ratio_ = declare_parameter("white_center_ratio", 0.6);
-    white_hits_needed_ = declare_parameter("white_hits_needed", 2);
+    white_arm_y_ = declare_parameter("white_arm_y", 300);
     side_clear_threshold_ = declare_parameter("side_clear_threshold", 0.20);
     side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
     side_turn_kp_ = declare_parameter("side_turn_kp", 2.0);
@@ -377,6 +381,13 @@ private:
     else if (state_ == State::TURN)
     {
       turn_until_aligned(yellow);
+    }
+    else if (state_ == State::SIDE_TURN)
+    {
+      if (side_use_cam_)
+      {
+        side_turn_by_camera(white_mask(lab));
+      }
     }
     else if (state_ == State::STEM)
     {
@@ -662,7 +673,9 @@ private:
     left_hits_ = 0;
     right_hits_ = 0;
     clear_hits_ = 0;
-    white_hits_ = 0;
+    last_white_y_ = -1.0;
+    last_white_tilt_.reset();
+    side_cam_tilt0_.reset();
     RCLCPP_INFO(get_logger(), "입구 길을 똑바로 봄 (남은 기울기 %.1f도) -> 두 차선 가운데로 올라감",
       lean * 180.0 / M_PI);
   }
@@ -807,25 +820,47 @@ private:
     start_side_turn(side_seen_ * toward);
   }
 
-  // 앞의 가로 흰 선(주차장 끝 테두리)이 화면 맨 아래 근처에 왔는지 보고, 왔으면
+  // 앞의 가로 흰 선(주차장 끝 테두리)이 화면에서 사라지기 직전인지 보고, 그렇다면
   //   장애물을 본 쪽이 있으면 그쪽으로 돌기 시작, 없으면 멈춤. 무언가 했으면 true
+  //   "사라지기 직전" = (1) 흰 선이 white_trigger_y 줄보다 아래에 보임, 또는
+  //                     (2) 바로 전 영상에서 white_arm_y 줄보다 아래에 있던 흰 선이 이번 영상에서 안 보임
+  //   (카메라가 초당 몇 장이라, 흰 선이 맨 아래 몇 줄을 지나가는 걸 못 찍고 지나칠 수 있어서 (2) 도 본다)
   bool check_white_trigger(const cv::Mat & white)
   {
     const std::optional<double> line_y = lowest_horizontal_white(white);
-    white_hits_ = (line_y && *line_y >= white_trigger_y_) ? white_hits_ + 1 : 0;
-    if (white_hits_ < white_hits_needed_)
+    bool fire = false;
+    double fire_y = 0.0;
+    if (line_y)
+    {
+      last_white_y_ = *line_y;
+      last_white_tilt_ = white_line_tilt(white);
+      fire = *line_y >= white_trigger_y_;
+      fire_y = *line_y;
+    }
+    else if (last_white_y_ >= white_arm_y_)
+    {
+      fire = true;                 // 바로 전에 화면 아래쪽에 있던 흰 선이 이제 안 보임 = 막 지나감
+      fire_y = last_white_y_;
+    }
+    else
+    {
+      last_white_y_ = -1.0;
+    }
+    if (!fire)
     {
       return false;
     }
+
     if (side_seen_ != 0.0)
     {
-      RCLCPP_INFO(get_logger(), "가로 흰 선이 화면 아래에 옴 (y=%.0f) -> 기억한 %s으로 회전", *line_y,
+      RCLCPP_INFO(get_logger(), "가로 흰 선이 화면에서 사라지기 직전 (y=%.0f) -> 기억한 %s으로 회전", fire_y,
         side_seen_ > 0.0 ? "왼쪽" : "오른쪽");
+      side_cam_tilt0_ = last_white_tilt_;   // 돌기 전 흰 선 기울기 (거의 0 = 가로)
       turn_toward_seen_side();
     }
     else
     {
-      RCLCPP_INFO(get_logger(), "가로 흰 선이 화면 아래에 옴 (y=%.0f), 옆 장애물은 못 봄 -> 정지", *line_y);
+      RCLCPP_INFO(get_logger(), "가로 흰 선이 화면에서 사라지기 직전 (y=%.0f), 옆 장애물은 못 봄 -> 정지", fire_y);
       finish();
     }
     return true;
@@ -869,8 +904,71 @@ private:
     side_use_odom_ = odom_received_ && (now() - last_odom_time_).seconds() < odom_timeout_;
     side_start_yaw_ = odom_yaw_;
     side_turned_ = 0.0;
+    // 가로 흰 선을 보고 돌기 시작했으면: 그 흰 선이 기운 각도로 돈 각도를 잰다 (카메라)
+    side_use_cam_ = side_cam_ && side_cam_tilt0_.has_value();
+    side_cam_lost_ = 0;
+    side_cam_turned_ = 0.0;
+    const char * how = side_use_cam_ ? "카메라 (가로 흰 선 기울기) 로 각도 잼" :
+      (side_use_odom_ ? "odom 으로 각도 잼" : "odom 없음 -> 시간으로");
     RCLCPP_INFO(get_logger(), "%s으로 %.0f도 회전 시작 (%s)", direction < 0.0 ? "오른쪽" : "왼쪽",
-      side_turn_deg_, side_use_odom_ ? "odom 으로 각도 잼" : "odom 없음 -> 시간으로");
+      side_turn_deg_, how);
+  }
+
+  // 영상이 올 때마다 (SIDE_TURN + 카메라 사용 중): 가로였던 흰 선이 기운 각도 = 돈 각도
+  //   목표 각도까지 남은 만큼 천천히 돌고, 다 돌면 멈춤.
+  //   흰 선을 연속 side_cam_lost_frames 번 못 찾으면 odom 으로 넘어간다 (odom 도 없으면 시간)
+  void side_turn_by_camera(const cv::Mat & white)
+  {
+    const std::optional<double> tilt = white_line_tilt(white);
+    if (!tilt)
+    {
+      side_cam_lost_++;
+      if (side_cam_lost_ >= side_cam_lost_frames_)
+      {
+        side_use_cam_ = false;
+        RCLCPP_WARN(get_logger(), "회전 중 흰 선을 놓침 (카메라로 %.1f도) -> %s 으로 이어서 잼",
+          side_cam_turned_ * 180.0 / M_PI, side_use_odom_ ? "odom" : "시간");
+      }
+      return;                    // 바퀴는 마지막 명령대로 계속 돈다
+    }
+    side_cam_lost_ = 0;
+    side_cam_turned_ = std::abs(*tilt - *side_cam_tilt0_);
+    const double remain = side_turn_deg_ * M_PI / 180.0 - side_cam_turned_;
+    if (remain <= side_tolerance_deg_ * M_PI / 180.0)
+    {
+      end_side_turn();
+      return;
+    }
+    const double w = std::clamp(side_turn_kp_ * remain, side_min_speed_, side_turn_speed_);
+    drive(0.0, side_direction_ * w);
+  }
+
+  // 흰색 덩어리 중 가장 큰 것(= 주차장 끝 테두리)의 기울기 [rad]. 0 = 가로, pi/2 = 세로
+  //   덩어리가 side_cam_min_area 보다 작으면 (흰 선이 거의 안 보임) 비어 있음
+  std::optional<double> white_line_tilt(const cv::Mat & white) const
+  {
+    cv::Mat labels, stats, centroids;
+    const int n = cv::connectedComponentsWithStats(white, labels, stats, centroids, 8, CV_32S);
+    int best = 0;
+    int best_area = 0;
+    for (int i = 1; i < n; i++)                // 0 은 배경
+    {
+      const int area = stats.at<int>(i, cv::CC_STAT_AREA);
+      if (area > best_area)
+      {
+        best = i;
+        best_area = area;
+      }
+    }
+    if (best == 0 || best_area < side_cam_min_area_)
+    {
+      return std::nullopt;
+    }
+    std::vector<cv::Point> points;
+    cv::findNonZero(labels == best, points);
+    cv::Vec4f line;                            // (방향 x, 방향 y, 지나는 점 x, y)
+    cv::fitLine(points, line, cv::DIST_HUBER, 0, 0.01, 0.01);
+    return std::atan2(std::abs(line[1]), std::abs(line[0]));
   }
 
   // odom 이 올 때마다 (SIDE_TURN + odom 사용 중일 때): 돈 각도를 재고, 남은 각도에 맞춰 속도 조절
@@ -891,6 +989,15 @@ private:
   // 0.1초마다: odom 을 안 쓰면 시간으로 돌기. odom 을 써도 너무 오래 걸리면 (odom 끊김 등) 멈춤
   void step_side_turn()
   {
+    if (side_use_cam_)
+    {
+      if (state_time_ >= side_turn_time_ * 3.0)
+      {
+        stop_wheels();
+        give_up("카메라로 회전 중 너무 오래 걸림");
+      }
+      return;                    // 바퀴 명령은 영상이 올 때마다 side_turn_by_camera() 가 보낸다
+    }
     if (side_use_odom_)
     {
       if ((now() - last_odom_time_).seconds() > odom_timeout_ || state_time_ >= side_turn_time_ * 3.0)
@@ -914,7 +1021,12 @@ private:
     state_ = State::DONE;
     const bool right = side_direction_ < 0.0;
     publish_mode(ControlMode::STOP, right ? "turned_right" : "turned_left");
-    if (side_use_odom_)
+    if (side_use_cam_)
+    {
+      RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (카메라, odom %.1f도) -> 정지 (다음 단계는 아직 없음)",
+        right ? "오른쪽" : "왼쪽", side_cam_turned_ * 180.0 / M_PI, side_turned_ * 180.0 / M_PI);
+    }
+    else if (side_use_odom_)
     {
       RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (odom) -> 정지 (다음 단계는 아직 없음)",
         right ? "오른쪽" : "왼쪽", side_turned_ * 180.0 / M_PI);
@@ -933,9 +1045,22 @@ private:
     odom_yaw_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     odom_received_ = true;
     last_odom_time_ = now();
-    if (state_ == State::SIDE_TURN && side_use_odom_)
+    if (state_ != State::SIDE_TURN || !side_use_odom_)
+    {
+      return;
+    }
+    if (!side_use_cam_)
     {
       step_side_turn_odom();
+      return;
+    }
+    // 카메라로 도는 중: odom 으로 잰 각도가 목표 + side_cam_max_extra_deg 를 넘으면 무조건 멈춤 (안전)
+    side_turned_ = std::abs(wrap_angle(odom_yaw_ - side_start_yaw_));
+    if (side_turned_ >= (side_turn_deg_ + side_cam_max_extra_deg_) * M_PI / 180.0)
+    {
+      RCLCPP_WARN(get_logger(), "카메라 각도 %.1f도인데 odom 으로 %.1f도 -> 안전하게 멈춤",
+        side_cam_turned_ * 180.0 / M_PI, side_turned_ * 180.0 / M_PI);
+      end_side_turn();
     }
   }
 
@@ -1127,10 +1252,14 @@ private:
   double side_turn_deg_;
   bool side_turn_toward_;
   std::string side_turn_when_;
+  bool side_cam_;
+  int64_t side_cam_min_area_;
+  int64_t side_cam_lost_frames_;
+  double side_cam_max_extra_deg_;
   int64_t white_trigger_y_;
   int64_t white_row_min_pixels_;
   double white_center_ratio_;
-  int64_t white_hits_needed_;
+  int64_t white_arm_y_;
   double side_clear_threshold_;
   double side_turn_speed_;
   double side_turn_kp_;
@@ -1155,10 +1284,15 @@ private:
   int64_t right_hits_ = 0;         // 오른쪽 PSD 가 연속으로 가까웠던 횟수
   double side_seen_ = 0.0;         // 장애물을 본 쪽 (+1 왼쪽, -1 오른쪽, 0 아직 못 봄)
   int64_t clear_hits_ = 0;         // 장애물을 본 쪽 PSD 가 연속으로 멀었던 횟수
-  int64_t white_hits_ = 0;         // 가로 흰 선이 연속으로 화면 아래에 있었던 프레임 수
+  double last_white_y_ = -1.0;     // 바로 전 영상에서 가로 흰 선의 줄 번호 (-1 = 없음)
+  std::optional<double> last_white_tilt_;  // 바로 전 영상에서 흰 선 기울기 [rad]
   double side_direction_ = 0.0;    // SIDE_TURN 방향 (+1 왼쪽, -1 오른쪽)
   double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s] (odom 없을 때)
   bool side_use_odom_ = false;     // SIDE_TURN 을 odom 으로 재는지
+  bool side_use_cam_ = false;      // SIDE_TURN 을 카메라 (가로 흰 선 기울기) 로 재는지
+  std::optional<double> side_cam_tilt0_;   // 돌기 시작할 때 흰 선 기울기 [rad]
+  int64_t side_cam_lost_ = 0;      // 흰 선을 연속으로 못 찾은 프레임 수
+  double side_cam_turned_ = 0.0;   // 카메라로 잰 돈 각도 [rad]
   double side_start_yaw_ = 0.0;    // SIDE_TURN 시작할 때 방향 [rad]
   double side_turned_ = 0.0;       // 지금까지 돈 각도 [rad]
   double odom_yaw_ = 0.0;          // odom 방향 [rad]
