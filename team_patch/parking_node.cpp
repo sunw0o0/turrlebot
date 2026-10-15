@@ -37,11 +37,15 @@
 //          │        한쪽만 보이면 그 선에서 차선 폭 절반만큼 떨어져서 간다
 //          │  차선(노란선 / 흰 점선)이 둘 다 연속으로 안 보임 = 통로 끝 -> (5)
 //          │
-//          │  옆 PSD 가 side_psd_threshold (0.15m) 이하로 연속 side_hits_needed 번 = 그쪽에 장애물.
-//          │  계속 직진하다가 그쪽 PSD 가 side_clear_threshold (0.20m) 보다 멀어지면 (= 다 지나감):
+//          │  옆 PSD 가 side_psd_threshold (0.15m) 이하로 연속 side_hits_needed 번 = 그쪽에 장애물 (기억).
+//          │  계속 직진하다가 앞의 가로 흰 선(주차장 끝 테두리)이 화면 맨 아래 근처(white_trigger_y)에 오면:
 //          │    왼쪽 장애물  -> 왼쪽으로 side_turn_deg (40도) (SIDE_TURN)
 //          │    오른쪽 장애물 -> 오른쪽으로 side_turn_deg (40도)
-//          │    (side_turn_toward: false 면 반대쪽으로, side_turn_on_clear: false 면 보자마자 돈다)
+//          │    장애물을 못 봤으면 -> 그냥 멈춤 ("parking_node:stem_end")
+//          │  side_turn_when 으로 도는 순간을 바꿀 수 있다:
+//          │    white = 가로 흰 선이 화면 아래에 올 때 (기본), seen = PSD 로 보자마자,
+//          │    clear = 장애물을 다 지나가서 그쪽 PSD 가 side_clear_threshold 보다 멀어질 때
+//          │    (side_turn_toward: false 면 반대쪽으로)
 //          │  (각도는 엔코더 odom 으로 실제 돈 각도를 재서 멈춘다. odom 이 안 오면 "회전 속도 x 시간")
 //          │  돌고 나면 멈추고 STOP ("parking_node:turned_right" / "turned_left")
 //          ▼
@@ -258,7 +262,11 @@ private:
     side_hits_needed_ = declare_parameter("side_hits_needed", 3);
     side_turn_deg_ = declare_parameter("side_turn_deg", 40.0);
     side_turn_toward_ = declare_parameter("side_turn_toward", true);
-    side_turn_on_clear_ = declare_parameter("side_turn_on_clear", false);
+    side_turn_when_ = declare_parameter("side_turn_when", std::string("white"));
+    white_trigger_y_ = declare_parameter("white_trigger_y", 380);
+    white_row_min_pixels_ = declare_parameter("white_row_min_pixels", 150);
+    white_center_ratio_ = declare_parameter("white_center_ratio", 0.6);
+    white_hits_needed_ = declare_parameter("white_hits_needed", 2);
     side_clear_threshold_ = declare_parameter("side_clear_threshold", 0.20);
     side_turn_speed_ = declare_parameter("side_turn_speed", 0.6);
     side_turn_kp_ = declare_parameter("side_turn_kp", 2.0);
@@ -372,11 +380,16 @@ private:
     }
     else if (state_ == State::STEM)
     {
+      const cv::Mat white = white_mask(lab);
+      if (side_turn_when_ == "white" && check_white_trigger(white))
+      {
+        return;                  // 회전 시작 (또는 정지)
+      }
       // 노란선 + (흰 점선). 가로로 누운 흰선(주차장 테두리)은 선을 이을 때 빠진다
       cv::Mat lines = yellow;
       if (stem_use_white_)
       {
-        cv::bitwise_or(yellow, white_mask(lab), lines);
+        cv::bitwise_or(yellow, white, lines);
       }
       drive_between_lines(lines);
     }
@@ -649,6 +662,7 @@ private:
     left_hits_ = 0;
     right_hits_ = 0;
     clear_hits_ = 0;
+    white_hits_ = 0;
     RCLCPP_INFO(get_logger(), "입구 길을 똑바로 봄 (남은 기울기 %.1f도) -> 두 차선 가운데로 올라감",
       lean * 180.0 / M_PI);
   }
@@ -680,12 +694,15 @@ private:
     if (!left && !right)
     {
       lines_missing_++;
-      if (lines_missing_ >= stem_end_frames_ && state_time_ >= stem_min_time_)
+      // side_turn_when: white 면 차선이 끝나도 멈추지 않고, 가로 흰 선이 화면 아래에 올 때까지 직진
+      //   (그 흰 선을 보고 돌거나 멈춘다. 끝내 안 보이면 stem_timeout 에서 멈춤)
+      const bool wait_white = side_turn_when_ == "white";
+      if (!wait_white && lines_missing_ >= stem_end_frames_ && state_time_ >= stem_min_time_)
       {
         finish();
         return;
       }
-      drive(speed_, 0.0);     // 잠깐 안 보이면 직진
+      drive(speed_, 0.0);     // 안 보이면 직진
       return;
     }
     lines_missing_ = 0;
@@ -715,7 +732,8 @@ private:
   //   (1) 옆 PSD 가 side_psd_threshold 이하로 연속 side_hits_needed 번 -> 그쪽에 장애물 있음 (기억만, 계속 직진)
   //   (2) 그 뒤 그쪽 PSD 가 side_clear_threshold 보다 멀어진 게 연속 side_hits_needed 번
   //       -> 장애물을 다 지나감 -> 그쪽으로 (side_turn_toward: false 면 반대쪽으로) 돌기 시작
-  //   side_turn_on_clear: false 면 (1) 에서 바로 돈다
+  //   side_turn_when: seen 이면 (1) 에서 바로 돈다, white 면 (1) 에서 기억만 하고
+  //   가로 흰 선이 화면 아래에 올 때 돈다 (on_image -> check_white_trigger)
   void check_side_psd()
   {
     if (state_ != State::STEM)
@@ -746,16 +764,26 @@ private:
         return;
       }
       clear_hits_ = 0;
-      if (side_turn_on_clear_)
+      if (side_turn_when_ == "seen")
+      {
+        turn_toward_seen_side();
+      }
+      else if (side_turn_when_ == "clear")
       {
         RCLCPP_INFO(get_logger(), "장애물 옆을 지나갈 때까지 계속 직진");
-        return;
       }
-      turn_toward_seen_side();
+      else
+      {
+        RCLCPP_INFO(get_logger(), "기억함. 앞의 가로 흰 선이 화면 아래에 올 때까지 계속 직진");
+      }
       return;
     }
 
-    // (2) 장애물을 봤으면: 그쪽 PSD 가 멀어질 때까지 기다리기
+    // (2) side_turn_when: clear 일 때만 - 그쪽 PSD 가 멀어질 때까지 기다리기
+    if (side_turn_when_ != "clear")
+    {
+      return;
+    }
     const double value = side_seen_ > 0.0 ? psd_.left : psd_.right;
     clear_hits_ = (value > side_clear_threshold_) ? clear_hits_ + 1 : 0;
     if (clear_hits_ >= side_hits_needed_)
@@ -777,6 +805,53 @@ private:
   {
     const double toward = side_turn_toward_ ? 1.0 : -1.0;
     start_side_turn(side_seen_ * toward);
+  }
+
+  // 앞의 가로 흰 선(주차장 끝 테두리)이 화면 맨 아래 근처에 왔는지 보고, 왔으면
+  //   장애물을 본 쪽이 있으면 그쪽으로 돌기 시작, 없으면 멈춤. 무언가 했으면 true
+  bool check_white_trigger(const cv::Mat & white)
+  {
+    const std::optional<double> line_y = lowest_horizontal_white(white);
+    white_hits_ = (line_y && *line_y >= white_trigger_y_) ? white_hits_ + 1 : 0;
+    if (white_hits_ < white_hits_needed_)
+    {
+      return false;
+    }
+    if (side_seen_ != 0.0)
+    {
+      RCLCPP_INFO(get_logger(), "가로 흰 선이 화면 아래에 옴 (y=%.0f) -> 기억한 %s으로 회전", *line_y,
+        side_seen_ > 0.0 ? "왼쪽" : "오른쪽");
+      turn_toward_seen_side();
+    }
+    else
+    {
+      RCLCPP_INFO(get_logger(), "가로 흰 선이 화면 아래에 옴 (y=%.0f), 옆 장애물은 못 봄 -> 정지", *line_y);
+      finish();
+    }
+    return true;
+  }
+
+  // 화면을 가로지르는 흰 선 중 가장 아래(= 로봇에 가장 가까운) 것의 줄 번호. 없으면 비어 있음
+  //   한 줄에 흰 점이 white_row_min_pixels 이상이고, 화면 가운데 40% 구간도 white_center_ratio 이상 채워야 한다
+  //   (주차장 입구 쪽 테두리는 길이 들어오는 가운데가 뚫려 있어서 빠진다)
+  std::optional<double> lowest_horizontal_white(const cv::Mat & white) const
+  {
+    const int c0 = static_cast<int>(white.cols * 0.3);
+    const int c1 = static_cast<int>(white.cols * 0.7);
+    const double center_need = (c1 - c0) * white_center_ratio_;
+    for (int y = white.rows - 1; y >= 0; y--)
+    {
+      const int all = cv::countNonZero(white.row(y));
+      if (all < white_row_min_pixels_)
+      {
+        continue;
+      }
+      if (cv::countNonZero(white.row(y).colRange(c0, c1)) >= center_need)
+      {
+        return static_cast<double>(y);
+      }
+    }
+    return std::nullopt;
   }
 
   // direction: +1 왼쪽, -1 오른쪽
@@ -1051,7 +1126,11 @@ private:
   int64_t side_hits_needed_;
   double side_turn_deg_;
   bool side_turn_toward_;
-  bool side_turn_on_clear_;
+  std::string side_turn_when_;
+  int64_t white_trigger_y_;
+  int64_t white_row_min_pixels_;
+  double white_center_ratio_;
+  int64_t white_hits_needed_;
   double side_clear_threshold_;
   double side_turn_speed_;
   double side_turn_kp_;
@@ -1076,6 +1155,7 @@ private:
   int64_t right_hits_ = 0;         // 오른쪽 PSD 가 연속으로 가까웠던 횟수
   double side_seen_ = 0.0;         // 장애물을 본 쪽 (+1 왼쪽, -1 오른쪽, 0 아직 못 봄)
   int64_t clear_hits_ = 0;         // 장애물을 본 쪽 PSD 가 연속으로 멀었던 횟수
+  int64_t white_hits_ = 0;         // 가로 흰 선이 연속으로 화면 아래에 있었던 프레임 수
   double side_direction_ = 0.0;    // SIDE_TURN 방향 (+1 왼쪽, -1 오른쪽)
   double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s] (odom 없을 때)
   bool side_use_odom_ = false;     // SIDE_TURN 을 odom 으로 재는지

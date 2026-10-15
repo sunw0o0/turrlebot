@@ -60,14 +60,21 @@ parking:
     stem_min_time: 2.0              # [s] 올라가기 시작하고 이 시간 전에는 길 끝으로 안 봄
     stem_timeout: 20.0              # [s]
 
-    # 7) 주차장 길 / 통로를 올라가는 중 옆 PSD 가 가까우면 (장애물) 계속 가다가, 다 지나가면 그쪽으로 40도 돌고 멈춤
+    # 7) 주차장 길 / 통로를 올라가는 중 옆 PSD 가 가까우면 (장애물) 그쪽을 기억하고 계속 가다가,
+    #    앞의 가로 흰 선이 화면 아래에 오면 그쪽으로 40도 돌고 멈춤 (장애물을 못 봤으면 그냥 멈춤)
     #    (도로를 달릴 때는 안 봄. 90도는 엔코더 odom 으로 실제 돈 각도를 잰다. odom 이 없으면 시간으로)
     side_psd_threshold: 0.15        # [m] 왼쪽이 이 이하 -> 왼쪽으로, 오른쪽이 이 이하 -> 오른쪽으로
     side_hits_needed: 3             # 연속 이만큼 (PSD 20Hz -> 0.15초). 잡음 거르기
     side_turn_deg: 40.0             # 돌 각도
     side_turn_toward: true          # true = PSD 가 가까운 쪽으로 돎, false = 반대쪽으로
-    side_turn_on_clear: false       # true = 장애물을 본 뒤 계속 가다가, 그쪽 PSD 가 멀어지면(다 지나가면) 돎
-                                    # false = 보자마자 돎
+    side_turn_when: white           # 언제 돌지
+                                    #   white = PSD 로 본 쪽을 기억했다가, 앞의 가로 흰 선(주차장 끝)이 화면 아래에 오면
+                                    #   seen  = PSD 로 보자마자
+                                    #   clear = 장애물을 다 지나가서 그쪽 PSD 가 side_clear_threshold 보다 멀어지면
+    white_trigger_y: 380            # 가로 흰 선이 BEV 의 이 줄(0 위 ~ 399 맨 아래)보다 아래로 오면 돎. 일찍 돌려면 줄이기
+    white_row_min_pixels: 150       # 한 줄에 흰 점이 이만큼 이상이어야 가로 흰 선
+    white_center_ratio: 0.6         # 화면 가운데 40% 구간을 이만큼 채워야 함 (입구 쪽 테두리는 가운데가 뚫려 있어 빠짐)
+    white_hits_needed: 2            # 연속 이만큼 프레임
     side_clear_threshold: 0.20      # [m] 장애물 본 쪽 PSD 가 이보다 멀어지면 "다 지나감" (0.15 보다 조금 크게)
     side_turn_speed: 0.3            # [rad/s] 최대 회전 속도 (실제 시험 후 0.6 -> 0.3)
     side_turn_kp: 2.0               # 남은 각도 -> 회전 속도 (끝에서 천천히)
