@@ -312,11 +312,13 @@ private:
     exit_enable_ = declare_parameter("exit_enable", true);
     exit_arc_speed_ = declare_parameter("exit_arc_speed", 0.08);
     exit_arc_radius_m_ = declare_parameter("exit_arc_radius_m", 0.0);
+    exit_arc_radius_gain_ = declare_parameter("exit_arc_radius_gain", 2.0);
     exit_arc_min_radius_m_ = declare_parameter("exit_arc_min_radius_m", 0.12);
     exit_arc_deg_ = declare_parameter("exit_arc_deg", 90.0);
     exit_check_ratio_ = declare_parameter("exit_check_ratio", 0.3);
     exit_line_max_rms_px_ = declare_parameter("exit_line_max_rms_px", 8.0);
     exit_overshoot_deg_ = declare_parameter("exit_overshoot_deg", 15.0);
+    exit_wait_yellow_deg_ = declare_parameter("exit_wait_yellow_deg", 15.0);
     exit_stop_y_ = declare_parameter("exit_stop_y", 350);
     exit_white_max_tilt_deg_ = declare_parameter("exit_white_max_tilt_deg", 30.0);
     exit_timeout_ = declare_parameter("exit_timeout", 20.0);
@@ -1310,15 +1312,17 @@ private:
 
   // ==================== (7) EXIT_ARC: 곡선으로 90도 돌아 길 쪽 보기 ====================
 
-  // 곡선 반지름 [m]: exit_arc_radius_m 이 0 이면 후진한 거리 (backup_speed x backup_time).
-  //   그러면 다 돌았을 때 바퀴 축이 후진을 시작한 곳(= 통로 가운데) 줄로 돌아온다.
+  // 곡선 반지름 [m]: exit_arc_radius_m 이 0 이면 후진한 거리 (backup_speed x backup_time) x exit_arc_radius_gain.
+  //   실제 반지름이 후진한 거리와 같으면 다 돌았을 때 바퀴 축이 후진을 시작한 곳(= 통로 가운데) 줄로 돌아온다.
+  //   이 로봇은 회전 명령보다 약 2배 더 돌아서 (시험: 90도 명령 -> 약 200도) 실제 반지름이 명령의 절반쯤이 된다
+  //   -> 명령 반지름을 2배 (exit_arc_radius_gain 2.0) 로 준다. 너무 크게 돌면 줄이고, 아직 확 꺾이면 키운다
   //   너무 작으면 안쪽 바퀴가 뒤로 돌거나 멈추므로 exit_arc_min_radius_m 보다 작게는 안 한다
   double exit_arc_radius()
   {
     double radius = exit_arc_radius_m_;
     if (radius <= 0.0)
     {
-      radius = backup_speed_ * std::max(0.0, backup_time_);
+      radius = backup_speed_ * std::max(0.0, backup_time_) * exit_arc_radius_gain_;
     }
     if (radius < exit_arc_min_radius_m_)
     {
@@ -1412,7 +1416,10 @@ private:
     }
     exit_cam_lost_ = 0;
     exit_cam_sum_ += *step;
-    const double remain = exit_arc_deg_ * M_PI / 180.0 - std::abs(exit_cam_sum_);
+    // 곡선으로 가면 새 직선이 화면에 들어와서 이 방법이 실제보다 조금 크게 잰다 (시뮬레이션: 75도를 90도로)
+    //   -> 노란선이 안 보이는 동안은 exit_wait_yellow_deg (15도) 더 돌면서 노란선을 기다린다
+    const double target = (exit_arc_deg_ + exit_wait_yellow_deg_) * M_PI / 180.0;
+    const double remain = target - std::abs(exit_cam_sum_);
     if (remain <= side_tolerance_deg_ * M_PI / 180.0)
     {
       RCLCPP_INFO(get_logger(), "곡선 %.1f도 돌았음 (카메라)", std::abs(exit_cam_sum_) * 180.0 / M_PI);
@@ -1763,11 +1770,13 @@ private:
   bool exit_enable_;
   double exit_arc_speed_;
   double exit_arc_radius_m_;
+  double exit_arc_radius_gain_;
   double exit_arc_min_radius_m_;
   double exit_arc_deg_;
   double exit_check_ratio_;
   double exit_line_max_rms_px_;
   double exit_overshoot_deg_;
+  double exit_wait_yellow_deg_;
   int64_t exit_stop_y_;
   double exit_white_max_tilt_deg_;
   double exit_timeout_;

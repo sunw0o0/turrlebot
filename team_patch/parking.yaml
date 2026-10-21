@@ -100,13 +100,16 @@ parking:
     #    -> 들어왔던 길을 반대로 내려가서 노란선을 지나 도로로 나오면 멈춤 (STOP "parking_node:exited")
     exit_enable: true               # false 면 후진 뒤 그냥 멈춤 (예전처럼)
     exit_arc_speed: 0.08            # [m/s] 곡선 도는 앞 속도
-    exit_arc_radius_m: 0.0          # [m] 곡선 반지름. 0 = 후진한 거리 (backup_speed x backup_time, 3초면 18cm)
-                                    #   -> 다 돌면 통로 가운데 줄로 돌아온다. 크게 하면 크게 돎
+    exit_arc_radius_m: 0.0          # [m] 곡선 반지름을 직접 정함. 0 = 후진한 거리 x exit_arc_radius_gain
+    exit_arc_radius_gain: 2.0       # 곡선 반지름 = 후진한 거리 (backup_speed x backup_time) x 이 값 (3초면 18cm x 2 = 36cm)
+                                    #   이 로봇은 회전 명령보다 약 2배 더 돌아서 실제로는 그 절반쯤으로 돈다
+                                    #   아직 확 꺾이면 키우고 (2.5), 너무 크게 돌아 반대쪽 노란선 쪽으로 가면 줄이기 (1.5)
     exit_arc_min_radius_m: 0.12     # [m] 이보다 작게는 안 함 (바퀴 간격 절반 9.5cm 보다 작으면 안쪽 바퀴가 뒤로 돎)
     exit_arc_deg: 90.0              # 노란선이 안 보일 때 돌 각도
     exit_check_ratio: 0.3           # 이만큼 (30%) 돈 뒤부터 노란선이 세로인지 본다
     exit_line_max_rms_px: 8.0       # 노란선 점들이 직선에서 평균 이보다 많이 벗어나면 안 씀 (두 선이 섞인 것)
     exit_overshoot_deg: 15.0        # 노란선이 이보다 많이 지나친 걸로 보이면 잘못 찾은 선으로 봄
+    exit_wait_yellow_deg: 15.0      # 노란선이 안 보이면 화면 직선 각도로 exit_arc_deg + 이 값까지 돌며 노란선을 기다림
     exit_stop_y: 350                # 도로 흰선이 BEV 의 이 줄보다 아래로 오면 멈춤. 크게 하면 더 나가서 멈춤
     exit_white_max_tilt_deg: 30.0   # 로봇이 비스듬해서 도로 흰선이 이만큼까지 기울어 보여도 찾음
     exit_timeout: 20.0              # [s] 길을 내려가는 데 이보다 오래 걸리면 멈춤
