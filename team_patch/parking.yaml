@@ -46,10 +46,12 @@ parking:
     turn_min_speed: 0.08            # [rad/s] 노란선이 거의 세로일 때 (가장 느린) 속도. 너무 낮으면 모터가 안 돎
     turn_slow_angle_deg: 60.0       # 길 노란선이 이 각도보다 덜 기울면 느려지기 시작 (세로에 가까울수록 turn_min_speed 쪽)
     turn_slow_power: 2.0            # 1 = 고르게 느려짐, 2 = 세로에 가까울수록 훨씬 많이 느려짐 (클수록 더 일찍 많이 느려짐)
-    aligned_deg: 1.5                # 두 선이 모두 이 각도 안이면 멈춤
-    parallel_deg: 8.0               # 두 선 기울기 차이가 이보다 크면 아직 길이 아님
-    pair_gap_min_px: 200.0          # 두 선 간격이 이 범위여야 길로 봄
-    pair_gap_max_px: 380.0
+    aligned_deg: 4.0                # 두 선이 모두 이 각도 안이면 멈춤 (1.5 -> 4: 잘 못 찾아서 널널하게)
+    parallel_deg: 15.0              # 두 선 기울기 차이가 이보다 크면 아직 길이 아님 (8 -> 15)
+    pair_gap_min_px: 150.0          # 두 선 간격이 이 범위여야 길로 봄 (200~380 -> 150~420)
+    pair_gap_max_px: 420.0
+    single_line_ok: true            # 한 선만 보여도 길 옆선 자리에 aligned_deg 안으로 서 있으면 멈춤
+    single_line_margin_px: 80.0     # 길 옆선 자리 = 로봇 가운데 ± 차선 폭/2, 이만큼 [px] 벗어나도 됨
     turn_min_time: 1.0              # [s] 돌기 시작하고 이 시간 전에는 안 멈춤
     turn_fit_rows: 230              # 화면 위쪽 이 줄까지만 봄 (아래쪽은 입구의 둥근 모서리)
 
@@ -88,6 +90,10 @@ parking:
     side_slow_power: 2.0            # 1 = 고르게 느려짐, 2 = 목표에 가까울수록 훨씬 많이 느려짐
     side_tolerance_deg: 1.0         # 남은 각도가 이 이하면 멈춤
     odom_timeout: 0.5               # [s] odom 이 이보다 오래 안 오면 odom 없는 걸로 봄
+
+    # 8) 90도 돈 뒤 후진 (뒤에는 센서가 없으니 천천히)
+    backup_time: 3.0                # [s] 0 이면 후진 안 함
+    backup_speed: 0.06              # [m/s] 3초면 약 18cm
 
     # 안전
     front_stop_distance: 0.10       # [m]

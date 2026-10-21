@@ -30,6 +30,7 @@
 //          ▼
 //   (3) TURN     : 제자리에서 왼쪽으로 돈다.
 //          │        BEV 에 입구 길의 노란선 두 개(왼쪽, 오른쪽)가 세로로 똑바로 보이면 다음으로
+//          │        (aligned_deg 4도 이내. 한 선만 보여도 길 옆선 자리에 세로로 서 있으면 됨)
 //          ▼
 //   (4) STEM     : 주차장 길을 올라간다. 양쪽이 노란선 -> 두 노란선의 가운데로
 //          │        노란선이 끝나면 같은 줄로 흰 점선(주차장 통로와 칸을 나누는 선)이 이어진다
@@ -47,7 +48,9 @@
 //          │    clear = 장애물을 다 지나가서 그쪽 PSD 가 side_clear_threshold 보다 멀어질 때
 //          │    (side_turn_toward: false 면 반대쪽으로)
 //          │  (각도: 화면의 직선(흰선/노란선)들이 돈 각도를 카메라로 잰다. 못 재면 odom, odom 도 없으면 "속도 x 시간")
-//          │  돌고 나면 멈추고 STOP ("parking_node:turned_right" / "turned_left")
+//          ▼
+//   (4-2) BACKUP : 90도 돈 뒤 backup_time (3초) 동안 backup_speed 로 후진하고 멈춤
+//          │        STOP ("parking_node:turned_right_backed" / "turned_left_backed")
 //          ▼
 //   (5) DONE     : 멈추고 control_mode = STOP ("parking_node:stem_end")
 //                  (다음 단계 - 빈 칸 고르기, 주차 - 는 아직 없음)
@@ -126,7 +129,8 @@ class ParkingNode : public rclcpp::Node
     EXTRA,       // 입구 가운데까지 남은 거리만큼 더 직진 (이 노드가 운전)
     TURN,        // 입구에서 왼쪽으로 도는 중 (이 노드가 운전)
     STEM,        // 주차장 길 -> 통로를 두 차선(노란선 / 흰 점선) 가운데로 올라가는 중 (이 노드가 운전)
-    SIDE_TURN,   // 옆 PSD 가 가까워서 반대쪽으로 90도 도는 중 (이 노드가 운전)
+    SIDE_TURN,   // 장애물 쪽으로 90도 도는 중 (이 노드가 운전)
+    BACKUP,      // 90도 돈 뒤 backup_time 초 후진 (이 노드가 운전)
     DONE,        // 끝 (또는 그만둠)
   };
 
@@ -244,10 +248,12 @@ private:
     turn_min_speed_ = declare_parameter("turn_min_speed", 0.08);
     turn_slow_angle_deg_ = declare_parameter("turn_slow_angle_deg", 60.0);
     turn_slow_power_ = declare_parameter("turn_slow_power", 2.0);
-    aligned_deg_ = declare_parameter("aligned_deg", 1.5);
-    parallel_deg_ = declare_parameter("parallel_deg", 8.0);
-    pair_gap_min_px_ = declare_parameter("pair_gap_min_px", 200.0);
-    pair_gap_max_px_ = declare_parameter("pair_gap_max_px", 380.0);
+    aligned_deg_ = declare_parameter("aligned_deg", 4.0);
+    parallel_deg_ = declare_parameter("parallel_deg", 15.0);
+    pair_gap_min_px_ = declare_parameter("pair_gap_min_px", 150.0);
+    pair_gap_max_px_ = declare_parameter("pair_gap_max_px", 420.0);
+    single_line_ok_ = declare_parameter("single_line_ok", true);
+    single_line_margin_px_ = declare_parameter("single_line_margin_px", 80.0);
     turn_min_time_ = declare_parameter("turn_min_time", 1.0);
     turn_fit_rows_ = declare_parameter("turn_fit_rows", 230);
 
@@ -279,6 +285,10 @@ private:
     side_slow_power_ = declare_parameter("side_slow_power", 2.0);
     side_tolerance_deg_ = declare_parameter("side_tolerance_deg", 1.0);
     odom_timeout_ = declare_parameter("odom_timeout", 0.5);
+
+    // 8) 90도 돈 뒤 후진
+    backup_time_ = declare_parameter("backup_time", 3.0);
+    backup_speed_ = declare_parameter("backup_speed", 0.06);
 
     // 안전
     front_stop_distance_ = declare_parameter("front_stop_distance", 0.10);
@@ -633,13 +643,20 @@ private:
       drive(0.0, turn_speed_);
       return;
     }
+    const double aligned = aligned_deg_ * M_PI / 180.0;
     if (!pair)
     {
+      // 두 선이 짝으로 안 보여도, 한 선이 길 옆선 자리에 거의 세로로 서 있으면 똑바로 본 걸로 친다
+      const std::optional<double> single = single_aligned_line(left, right, bottom_y, yellow.cols);
+      if (single)
+      {
+        start_stem(*single);
+        return;
+      }
       drive(0.0, turn_speed_for(leaning_left(left, right)));
       return;
     }
 
-    const double aligned = aligned_deg_ * M_PI / 180.0;
     const double lean_l = left->lean_left();
     const double lean_r = right->lean_left();
     if (std::abs(lean_l - lean_r) > parallel_deg_ * M_PI / 180.0)
@@ -655,6 +672,31 @@ private:
       return;
     }
     drive(0.0, std::copysign(turn_speed_for(lean), lean));   // 지나쳤으면(lean < 0) 오른쪽으로
+  }
+
+  // 왼쪽 / 오른쪽 선 중 하나가 "길의 옆선 자리" (로봇 가운데에서 차선 폭 절반 ± single_line_margin_px)에
+  // 거의 세로(aligned_deg 이내)로 서 있으면 그 기울기 [rad]. 없으면 비어 있음 (single_line_ok: false 면 항상 비어 있음)
+  std::optional<double> single_aligned_line(const std::optional<Line> & left,
+    const std::optional<Line> & right, double bottom_y, int cols) const
+  {
+    if (!single_line_ok_)
+    {
+      return std::nullopt;
+    }
+    const double aligned = aligned_deg_ * M_PI / 180.0;
+    const double robot_x = bev_center_x_ * cols;
+    const double half_lane = lane_width_px_ / 2.0;
+    if (left && std::abs(left->lean_left()) <= aligned &&
+      std::abs(left->x_at(bottom_y) - (robot_x - half_lane)) <= single_line_margin_px_)
+    {
+      return left->lean_left();
+    }
+    if (right && std::abs(right->lean_left()) <= aligned &&
+      std::abs(right->x_at(bottom_y) - (robot_x + half_lane)) <= single_line_margin_px_)
+    {
+      return right->lean_left();
+    }
+    return std::nullopt;
   }
 
   // 보이는 노란선 중 왼쪽으로 기운 것(= 아직 더 돌아야 하는 길의 선)의 기울기 [rad].
@@ -1087,24 +1129,58 @@ private:
   void end_side_turn()
   {
     stop_wheels();
-    state_ = State::DONE;
     const bool right = side_direction_ < 0.0;
-    publish_mode(ControlMode::STOP, right ? "turned_right" : "turned_left");
     if (side_use_cam_)
     {
-      RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (카메라, odom %.1f도) -> 정지 (다음 단계는 아직 없음)",
+      RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (카메라, odom %.1f도)",
         right ? "오른쪽" : "왼쪽", side_cam_turned_ * 180.0 / M_PI, side_turned_ * 180.0 / M_PI);
     }
     else if (side_use_odom_)
     {
-      RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (odom) -> 정지 (다음 단계는 아직 없음)",
-        right ? "오른쪽" : "왼쪽", side_turned_ * 180.0 / M_PI);
+      RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (odom)", right ? "오른쪽" : "왼쪽",
+        side_turned_ * 180.0 / M_PI);
     }
     else
     {
-      RCLCPP_INFO(get_logger(), "%s으로 %.0f도 돌았음 (시간) -> 정지 (다음 단계는 아직 없음)",
-        right ? "오른쪽" : "왼쪽", side_turn_deg_);
+      RCLCPP_INFO(get_logger(), "%s으로 %.0f도 돌았음 (시간)", right ? "오른쪽" : "왼쪽", side_turn_deg_);
     }
+    start_backup();
+  }
+
+  // ==================== (6) BACKUP: 90도 돈 뒤 후진 ====================
+
+  // backup_time 초 동안 backup_speed 로 뒤로 간다 (뒤에는 센서가 없으니 천천히). 0 이면 바로 끝
+  void start_backup()
+  {
+    if (backup_time_ <= 0.0)
+    {
+      finish_backup();
+      return;
+    }
+    state_ = State::BACKUP;
+    state_time_ = 0.0;
+    RCLCPP_INFO(get_logger(), "%.1f초 후진", backup_time_);
+    drive(-backup_speed_, 0.0);
+  }
+
+  // 0.1초마다: 시간이 될 때까지 후진, 다 되면 멈춤
+  void step_backup()
+  {
+    if (state_time_ >= backup_time_)
+    {
+      finish_backup();
+      return;
+    }
+    drive(-backup_speed_, 0.0);
+  }
+
+  void finish_backup()
+  {
+    stop_wheels();
+    state_ = State::DONE;
+    const bool right = side_direction_ < 0.0;
+    publish_mode(ControlMode::STOP, right ? "turned_right_backed" : "turned_left_backed");
+    RCLCPP_INFO(get_logger(), "후진 끝 -> 정지 (다음 단계는 아직 없음)");
   }
 
   // odom: 로봇 방향(yaw) 저장
@@ -1195,6 +1271,11 @@ private:
       step_side_turn();          // 시간으로 도는 거라 영상이 없어도 계속
       return;
     }
+    if (state_ == State::BACKUP)
+    {
+      step_backup();             // 시간으로 후진 (영상 안 봄)
+      return;
+    }
 
     // 영상이 끊기면 멈춤
     if ((now() - last_image_time_).seconds() > image_timeout_)
@@ -1209,7 +1290,7 @@ private:
   bool i_am_driving() const
   {
     return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN ||
-           state_ == State::STEM || state_ == State::SIDE_TURN;
+           state_ == State::STEM || state_ == State::SIDE_TURN || state_ == State::BACKUP;
   }
 
   // GUI 에 보일 단계 이름
@@ -1227,6 +1308,8 @@ private:
         return "stem";
       case State::SIDE_TURN:
         return side_direction_ < 0.0 ? "side_turn_right" : "side_turn_left";
+      case State::BACKUP:
+        return "backup";
       default:
         return "-";
     }
@@ -1308,6 +1391,8 @@ private:
   double turn_slow_power_;
   double aligned_deg_;
   double parallel_deg_;
+  bool single_line_ok_;
+  double single_line_margin_px_;
   double pair_gap_min_px_;
   double pair_gap_max_px_;
   double turn_min_time_;
@@ -1337,6 +1422,8 @@ private:
   double side_min_speed_;
   double side_tolerance_deg_;
   double odom_timeout_;
+  double backup_time_;
+  double backup_speed_;
   double front_stop_distance_;
   double image_timeout_;
   double approach_timeout_;
