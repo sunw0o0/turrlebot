@@ -162,3 +162,11 @@ cp ~/turrlebot/team_patch/parking.yaml colcon_ws/src/lane_follower/config/
 cd colcon_ws && MAKEFLAGS="-j1" colcon build --executor sequential --packages-select bird_eye_view lane_follower
 ```
 parking.yaml 의 robot_y_offset_px 는 bird_eye_view 보정과 같아야 한다 (17.9cm 보정 = 179, 14.1cm 보정 = 141).
+
+### 주차 전체 흐름 (지금 parking_node.cpp)
+
+표지판 -> 흰선 보고 직진 -> 입구에서 제자리 왼쪽 회전 -> 노란선 / 흰 점선 가운데로 올라감
+-> (옆 PSD 로 장애물 쪽 기억) 앞 가로 흰선이 화면 아래에 오면 장애물 쪽으로 90도 -> backup_time 초 후진
+-> 두 바퀴 다 앞으로 곡선 90도 (반지름 = 후진 거리, 길의 노란선이 세로가 되면 끝)
+-> 들어왔던 길을 내려가서 도로 흰선이 화면 아래에 오면 STOP ("parking_node:exited").
+곡선부터 안 하려면 parking.yaml 의 `exit_enable: false`.

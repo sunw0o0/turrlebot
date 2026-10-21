@@ -58,6 +58,7 @@ parking:
     # 6) 주차장 길 올라가기: 양쪽 노란선 가운데로. 노란선이 끝나면 흰 점선(통로 / 칸 경계)을 이어서 따라감
     #    차선(노란선 / 흰 점선)이 다 끝나면 멈춤
     stem_use_white: true            # false 면 노란선만 보고, 노란선이 끝나는 곳(주차장 입구)에서 멈춤
+    same_line_px: 40.0              # 왼쪽 칸 / 오른쪽 칸에서 찾은 두 선이 이만큼 가까우면 한 선 (화면 가운데에 걸친 선)
     stem_end_frames: 3              # 노란선이 둘 다 연속 이만큼 안 보이면 길 끝
     stem_min_time: 2.0              # [s] 올라가기 시작하고 이 시간 전에는 길 끝으로 안 봄
     stem_timeout: 20.0              # [s]
@@ -94,6 +95,21 @@ parking:
     # 8) 90도 돈 뒤 후진 (뒤에는 센서가 없으니 천천히)
     backup_time: 3.0                # [s] 0 이면 후진 안 함
     backup_speed: 0.06              # [m/s] 3초면 약 18cm
+
+    # 9) 후진 뒤: 두 바퀴 다 앞으로, 속도 차를 줘서 곡선으로 90도 (90도 돌았던 쪽과 같은 쪽)
+    #    -> 들어왔던 길을 반대로 내려가서 노란선을 지나 도로로 나오면 멈춤 (STOP "parking_node:exited")
+    exit_enable: true               # false 면 후진 뒤 그냥 멈춤 (예전처럼)
+    exit_arc_speed: 0.08            # [m/s] 곡선 도는 앞 속도
+    exit_arc_radius_m: 0.0          # [m] 곡선 반지름. 0 = 후진한 거리 (backup_speed x backup_time, 3초면 18cm)
+                                    #   -> 다 돌면 통로 가운데 줄로 돌아온다. 크게 하면 크게 돎
+    exit_arc_min_radius_m: 0.12     # [m] 이보다 작게는 안 함 (바퀴 간격 절반 9.5cm 보다 작으면 안쪽 바퀴가 뒤로 돎)
+    exit_arc_deg: 90.0              # 노란선이 안 보일 때 돌 각도
+    exit_check_ratio: 0.3           # 이만큼 (30%) 돈 뒤부터 노란선이 세로인지 본다
+    exit_line_max_rms_px: 8.0       # 노란선 점들이 직선에서 평균 이보다 많이 벗어나면 안 씀 (두 선이 섞인 것)
+    exit_overshoot_deg: 15.0        # 노란선이 이보다 많이 지나친 걸로 보이면 잘못 찾은 선으로 봄
+    exit_stop_y: 350                # 도로 흰선이 BEV 의 이 줄보다 아래로 오면 멈춤. 크게 하면 더 나가서 멈춤
+    exit_white_max_tilt_deg: 30.0   # 로봇이 비스듬해서 도로 흰선이 이만큼까지 기울어 보여도 찾음
+    exit_timeout: 20.0              # [s] 길을 내려가는 데 이보다 오래 걸리면 멈춤
 
     # 안전
     front_stop_distance: 0.10       # [m]
