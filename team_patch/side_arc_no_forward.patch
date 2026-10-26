@@ -1,0 +1,71 @@
+--- a/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 21:28:08.604532527 +0000
++++ b/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 21:28:08.607159105 +0000
+@@ -62,8 +62,8 @@
+ //          │  (각도: 화면의 직선(흰선/노란선)들이 돈 각도를 카메라로 잰다. 못 재면 odom, odom 도 없으면 "속도 x 시간")
+ //          ▼
+ //   ※ side_arc: true (기본) 면 "제자리 90도 + 후진" 대신 뒤로 가면서 도는 곡선 한 번으로 칸에 들어간다:
+-//      (4-0) SIDE_FORWARD : 곡선 반지름(side_arc_radius_m) + side_arc_forward_m 만큼 더 올라감
+-//                           (뒤로 곡선을 그리면 반지름만큼 다시 내려오므로)
++//      (4-0) SIDE_FORWARD : side_arc_forward_m 만큼 더 올라감 (기본 0 = 안 올라가고 바로 곡선)
++//                           (뒤로 곡선을 그리면 반지름만큼 통로 아래쪽으로 내려온다)
+ //      (4-1) SIDE_TURN    : 뒤로 가면서 장애물 쪽으로 90도 (side_arc_speed, 반지름 side_arc_radius_m)
+ //                           -> 다 돌면 반대쪽 칸 안에서 장애물 쪽을 보고 있다
+ //      (4-2) BACKUP       : side_arc_backup_time 초 더 후진 (0 이면 건너뜀)
+@@ -352,6 +352,7 @@
+     side_arc_radius_gain_ = declare_parameter("side_arc_radius_gain", 1.0);
+     side_arc_speed_ = declare_parameter("side_arc_speed", 0.06);
+     side_arc_forward_m_ = declare_parameter("side_arc_forward_m", 0.0);
++    side_arc_forward_max_m_ = declare_parameter("side_arc_forward_max_m", 0.30);
+     side_arc_backup_time_ = declare_parameter("side_arc_backup_time", 0.0);
+ 
+     // 8) 90도 돈 뒤 후진
+@@ -1134,12 +1135,23 @@
+     start_side_turn(side_seen_ * toward);
+   }
+ 
+-  // 뒤로 곡선을 그리면 로봇이 반지름만큼 통로 아래쪽으로도 내려온다.
+-  // 그래서 제자리에서 돌던 곳보다 (side_arc_radius_m + side_arc_forward_m) 더 올라간 뒤 곡선을 시작한다
++  // 곡선 전에 side_arc_forward_m 만큼 더 올라간다 (기본 0 = 가로 흰 선이 사라지면 바로 곡선).
++  //   잘못 넣어도 위험하지 않게 0 ~ side_arc_forward_max_m (30cm) 로 자른다
++  //   (뒤로 곡선을 그리면 로봇이 반지름만큼 통로 아래쪽으로도 내려온다. 칸 안에서 너무 아래에 서면 이 값을 조금 키운다)
+   void start_side_forward(double direction)
+   {
+     side_direction_ = direction;
+-    const double extra_m = std::max(0.0, side_arc_radius_m_ + side_arc_forward_m_);
++    const double extra_m = std::clamp(side_arc_forward_m_, 0.0, side_arc_forward_max_m_);
++    if (extra_m != side_arc_forward_m_)
++    {
++      RCLCPP_WARN(get_logger(), "side_arc_forward_m %.2fm 는 범위 밖 -> %.2fm 로", side_arc_forward_m_, extra_m);
++    }
++    if (extra_m <= 0.0)
++    {
++      side_forward_time_ = 0.0;
++      end_side_forward();        // 더 안 올라가고 바로 뒤로 곡선
++      return;
++    }
+     side_forward_time_ = extra_m / speed_;
+     state_ = State::SIDE_FORWARD;
+     state_time_ = 0.0;
+@@ -1275,7 +1287,13 @@
+     state_ = State::SIDE_TURN;
+     state_time_ = 0.0;
+     side_direction_ = direction;
+-    side_arc_radius_cmd_ = std::max(side_arc_radius_m_ * side_arc_radius_gain_, 0.05);
++    // 명령 반지름 = 반지름 x gain. 잘못 넣어도 위험하지 않게 5cm ~ 50cm 로 자른다
++    side_arc_radius_cmd_ = std::clamp(side_arc_radius_m_ * side_arc_radius_gain_, 0.05, 0.50);
++    if (side_arc_ && side_arc_radius_cmd_ != side_arc_radius_m_ * side_arc_radius_gain_)
++    {
++      RCLCPP_WARN(get_logger(), "곡선 명령 반지름 %.2fm 는 범위 밖 -> %.2fm 로 (side_arc_radius_m, side_arc_radius_gain 확인)",
++        side_arc_radius_m_ * side_arc_radius_gain_, side_arc_radius_cmd_);
++    }
+     // 가장 빠를 때 / 가장 느릴 때 회전 속도 [rad/s] (곡선이면 뒤 속도 / 반지름)
+     const double w_max = side_arc_ ? side_arc_speed_ / side_arc_radius_cmd_ : side_turn_speed_;
+     const double w_min = w_max * side_min_speed_ / side_turn_speed_;
+@@ -2155,6 +2173,7 @@
+   double side_arc_radius_gain_;
+   double side_arc_speed_;
+   double side_arc_forward_m_;
++  double side_arc_forward_max_m_;
+   double side_arc_backup_time_;
+   double backup_time_;
+   double backup_speed_;
