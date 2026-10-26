@@ -291,8 +291,9 @@ private:
     entry_arc_ = declare_parameter("entry_arc", true);
     entry_gap_to_center_m_ = declare_parameter("entry_gap_to_center_m", 0.33);
     entry_forward_m_ = declare_parameter("entry_forward_m", 0.0);
-    entry_arc_radius_m_ = declare_parameter("entry_arc_radius_m", 0.25);
-    entry_arc_radius_gain_ = declare_parameter("entry_arc_radius_gain", 2.0);
+    entry_arc_radius_m_ = declare_parameter("entry_arc_radius_m", 0.08);
+    entry_arc_radius_gain_ = declare_parameter("entry_arc_radius_gain", 1.0);
+    entry_arc_min_radius_m_ = declare_parameter("entry_arc_min_radius_m", 0.05);
     entry_arc_speed_ = declare_parameter("entry_arc_speed", 0.08);
     entry_check_deg_ = declare_parameter("entry_check_deg", 45.0);
 
@@ -728,13 +729,15 @@ private:
 
   // ==================== (3-1) ENTRY_ARC: 곡선으로 왼쪽으로 들어가기 ====================
 
-  // 두 바퀴 다 앞으로: 앞 속도 entry_arc_speed, 회전 = 속도 / (반지름 x entry_arc_radius_gain)
-  //   이 로봇은 회전 명령보다 약 2배 더 돌아서, 명령 반지름을 2배로 줘야 실제로 entry_arc_radius_m 쯤으로 돈다
+  // 앞 속도 entry_arc_speed, 회전 = 속도 / (반지름 x entry_arc_radius_gain)
+  //   기본: 반지름 8cm, gain 1.0 -> 노란선이 끊기고 25cm 직진한 뒤 확 꺾는다 (실제 시험에서 꺾는 시기가 좋았던 곳)
   void start_entry_arc()
   {
     state_ = State::ENTRY_ARC;
     state_time_ = 0.0;
-    const double radius_cmd = std::max(entry_arc_radius_m_ * entry_arc_radius_gain_, exit_arc_min_radius_m_);
+    // 입구는 확 꺾어도 되니 나가는 곡선의 최소 반지름 (12cm, 두 바퀴 다 앞으로) 대신 entry_arc_min_radius_m 만 지킨다
+    //   (반지름이 바퀴 간격 절반 9.5cm 보다 작으면 안쪽 바퀴는 살짝 뒤로 돈다)
+    const double radius_cmd = std::max(entry_arc_radius_m_ * entry_arc_radius_gain_, entry_arc_min_radius_m_);
     entry_w_ = entry_arc_speed_ / radius_cmd;
     entry_arc_time_full_ = (M_PI / 2.0) / entry_w_;   // 명령대로 돈다면 90도 걸리는 시간
     entry_arc_limit_ = entry_arc_time_full_ * 2.5;     // 너무 오래 걸리면 포기
@@ -1881,6 +1884,7 @@ private:
   double entry_forward_m_;
   double entry_arc_radius_m_;
   double entry_arc_radius_gain_;
+  double entry_arc_min_radius_m_;
   double entry_arc_speed_;
   double entry_check_deg_;
   bool stem_use_white_;
