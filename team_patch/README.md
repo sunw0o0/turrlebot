@@ -189,3 +189,12 @@ cd ~/Robit_intelligence_turtlebot_team
 git apply --check ~/turrlebot/team_patch/side_arc.patch && git apply ~/turrlebot/team_patch/side_arc.patch
 cd colcon_ws && colcon build --packages-select lane_follower
 ```
+
+### leave_turn.patch - 주차장에서 나와 도로로 곡선 -> 일반 주행 (side_arc_no_forward.patch 다음)
+길을 내려오다 왼쪽 노란선이 끊기면 들어갈 때와 같은 곡선으로 왼쪽 -> control_mode LANE.
+```bash
+cd ~/turrlebot && git pull
+cd ~/Robit_intelligence_turtlebot_team
+git apply --check ~/turrlebot/team_patch/leave_turn.patch && git apply ~/turrlebot/team_patch/leave_turn.patch
+cd colcon_ws && colcon build --packages-select lane_follower
+```

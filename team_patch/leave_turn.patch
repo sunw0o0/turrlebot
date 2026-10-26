@@ -1,0 +1,222 @@
+--- a/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 21:47:15.143221994 +0000
++++ b/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 21:47:15.145386788 +0000
+@@ -87,6 +87,10 @@
+ //          │            -> 왼쪽으로 곡선 (앞으로 가면서 왼쪽으로 휨) -> 아래(들어왔던 길)를 봄
+ //          ▼
+ //   (4-4) EXIT_STEM : 들어왔던 길을 반대로 내려간다 (흰 점선 -> 노란선, 두 차선 가운데로)
++//          │        leave_turn: true (기본) 면: 왼쪽 아래 노란선이 보이다가 끊기면 (길이 도로와 만나는 곳)
++//          │          -> 들어갈 때 (entry_arc) 와 같은 방법으로 조금 직진 + 왼쪽 곡선
++//          │          -> 도로의 노란선이 세로로 보이면 control_mode = LANE ("parking_node:leave_done") -> 일반 주행
++//          │          (주차 노드는 다시 표지판 기다리기. leave_rearm_delay 초 동안은 표지판을 무시)
+ //          │        도로의 흰선(가로)이 화면 아래(exit_stop_y)에 오면 = 노란선을 지나 도로에 나옴
+ //          │        STOP ("parking_node:exited")
+ //          ▼
+@@ -374,6 +378,12 @@
+     exit_white_max_tilt_deg_ = declare_parameter("exit_white_max_tilt_deg", 30.0);
+     exit_timeout_ = declare_parameter("exit_timeout", 20.0);
+ 
++    // 9-1) 길을 내려와 도로로 나갈 때: 들어갈 때처럼 곡선으로 왼쪽 -> 일반 주행(LANE)
++    leave_turn_ = declare_parameter("leave_turn", true);
++    leave_forward_m_ = declare_parameter("leave_forward_m", 0.0);
++    leave_yellow_frames_ = declare_parameter("leave_yellow_frames", 2);
++    leave_rearm_delay_ = declare_parameter("leave_rearm_delay", 20.0);
++
+     // 안전
+     front_stop_distance_ = declare_parameter("front_stop_distance", 0.10);
+     image_timeout_ = declare_parameter("image_timeout", 0.5);
+@@ -393,6 +403,11 @@
+ 
+     sign_hits_ = parking_sign ? sign_hits_ + 1 : 0;
+ 
++    if (state_ == State::WAITING && now().seconds() < rearm_until_s_)
++    {
++      sign_hits_ = 0;            // 주차장에서 막 나왔음: 같은 표지판을 다시 보고 들어가지 않게
++      return;
++    }
+     if (state_ == State::WAITING && sign_hits_ >= sign_hits_needed_)
+     {
+       RCLCPP_INFO(get_logger(), "주차 표지판 인식 (크기 %.3f, 신뢰도 %.2f) -> 흰선 보고 직진하며 입구 찾기",
+@@ -477,7 +492,14 @@
+     }
+     else if (state_ == State::EXTRA)
+     {
+-      drive_along_white(white_mask(lab));
++      if (leaving_)
++      {
++        drive(speed_, 0.0);      // 도로로 나가는 중: 앞에 도로 흰선이 가로로 있어서 그냥 직진
++      }
++      else
++      {
++        drive_along_white(white_mask(lab));
++      }
+     }
+     else if (state_ == State::TURN)
+     {
+@@ -530,6 +552,11 @@
+     else if (state_ == State::EXIT_STEM)
+     {
+       const cv::Mat white = white_mask(lab);
++      if (leave_turn_ && leave_gap_reached(yellow))
++      {
++        start_leave_straight();  // 길이 도로와 만남 -> 들어갈 때처럼 조금 직진 + 왼쪽 곡선
++        return;
++      }
+       if (white_line_passing(lowest_crossing_white(white), exit_stop_y_, exit_white_y_))
+       {
+         finish_exit();
+@@ -634,6 +661,7 @@
+   {
+     choose_speed();
+     state_ = State::APPROACH;
++    leaving_ = false;
+     gap_ = Gap::BEFORE;
+     gap_frames_ = 0;
+     state_time_ = 0.0;
+@@ -763,7 +791,7 @@
+   // EXTRA 가 끝나면: entry_arc 면 곡선, 아니면 제자리 회전
+   void start_turn_or_arc()
+   {
+-    if (entry_arc_)
++    if (entry_arc_ || leaving_)
+     {
+       start_entry_arc();
+       return;
+@@ -829,9 +857,14 @@
+       // 왼쪽으로 돌고 있으니 길의 선은 왼쪽으로 기울어 있다가 (+) 세로 (0) 가 된다
+       if (lean && *lean <= aligned_deg_ * M_PI / 180.0 && *lean >= -exit_overshoot_deg_ * M_PI / 180.0)
+       {
+-        RCLCPP_INFO(get_logger(), "곡선 중 길의 노란선이 세로가 됨 (카메라 각도 %.1f도)",
++        RCLCPP_INFO(get_logger(), "곡선 중 %s의 노란선이 세로가 됨 (카메라 각도 %.1f도)", leaving_ ? "도로" : "길",
+           std::abs(entry_cam_sum_) * 180.0 / M_PI);
+         stop_wheels();
++        if (leaving_)
++        {
++          finish_leave();
++          return;
++        }
+         start_stem(*lean);
+         return;
+       }
+@@ -1868,7 +1901,71 @@
+     state_time_ = 0.0;
+     lines_missing_ = 0;
+     exit_white_y_ = -1.0;
+-    RCLCPP_INFO(get_logger(), "들어왔던 길을 두 차선 가운데로 내려감 (도로 흰선이 보이면 멈춤)");
++    leave_present_ = 0;
++    leave_seen_ = false;
++    leave_empty_ = 0;
++    RCLCPP_INFO(get_logger(), "들어왔던 길을 두 차선 가운데로 내려감 (%s)",
++      leave_turn_ ? "왼쪽 노란선이 끊기면 왼쪽 곡선으로 도로에" : "도로 흰선이 보이면 멈춤");
++  }
++
++  // ==================== (9) 도로로 나가기: 들어갈 때처럼 곡선으로 왼쪽 -> LANE ====================
++
++  // 왼쪽 아래 칸 (들어갈 때 입구를 찾던 칸과 같음) 의 노란선:
++  //   연속 leave_yellow_frames 번 보임 (길의 왼쪽 노란선) -> 그 뒤 연속 gap_frames_needed 번 안 보임 = 길이 도로와 만남
++  //   (길 위쪽은 흰 점선이라 처음부터 비어 있다 -> 노란선을 먼저 본 뒤에만 "끊김" 으로 친다)
++  bool leave_gap_reached(const cv::Mat & yellow)
++  {
++    const int y1 = std::min(static_cast<int>(watch_bottom_) + 1, yellow.rows);
++    const int y0 = std::max(0, y1 - static_cast<int>(watch_rows_));
++    const int x1 = std::min(static_cast<int>(watch_x_max_), yellow.cols);
++    const int count = cv::countNonZero(yellow(cv::Range(y0, y1), cv::Range(0, x1)));
++    if (!leave_seen_)
++    {
++      leave_present_ = count >= present_pixels_ ? leave_present_ + 1 : 0;
++      if (leave_present_ >= leave_yellow_frames_)
++      {
++        leave_seen_ = true;
++        RCLCPP_INFO(get_logger(), "길의 왼쪽 노란선 보임 (%d개) -> 끊기면 도로", count);
++      }
++      return false;
++    }
++    leave_empty_ = count <= empty_pixels_ ? leave_empty_ + 1 : 0;
++    if (leave_empty_ >= gap_frames_needed_)
++    {
++      RCLCPP_INFO(get_logger(), "왼쪽 노란선 끊김 (%d개) -> 도로", count);
++      return true;
++    }
++    return false;
++  }
++
++  // 들어갈 때와 같은 계산: 더 갈 거리 = entry_gap_to_center_m - entry_arc_radius_m + entry_forward_m + leave_forward_m
++  //   (길 폭과 도로 폭이 같고 모서리 모양도 같아서, 들어갈 때 맞춘 entry_forward_m 을 그대로 쓰고 leave_forward_m 으로 더 조절)
++  void start_leave_straight()
++  {
++    leaving_ = true;
++    const double extra_m = std::max(0.0,
++      entry_gap_to_center_m_ - entry_arc_radius_m_ + entry_forward_m_ + leave_forward_m_);
++    extra_time_ = extra_m / speed_;
++    state_ = State::EXTRA;
++    state_time_ = 0.0;
++    RCLCPP_INFO(get_logger(), "%.1fcm 더 직진한 뒤 곡선으로 왼쪽 (도로로)", extra_m * 100.0);
++    if (extra_time_ <= 0.0)
++    {
++      start_turn_or_arc();
++    }
++  }
++
++  // 도로를 똑바로 봄 -> lane_follower 에게 넘긴다 (control_mode = LANE), 주차 노드는 다시 표지판 기다리기
++  void finish_leave()
++  {
++    leaving_ = false;
++    state_ = State::WAITING;
++    sign_hits_ = 0;
++    rearm_until_s_ = now().seconds() + leave_rearm_delay_;
++    handover_ticks_ = 5;         // 0.5초 동안 LANE 을 몇 번 더 보낸다 (못 받는 일 없게)
++    publish_mode(ControlMode::LANE, "leave_done");
++    RCLCPP_INFO(get_logger(), "도로로 나옴 -> 주차 끝, 일반 주행 (LANE). %.0f초 동안 주차 표지판 무시",
++      leave_rearm_delay_);
+   }
+ 
+   // 도로의 흰선이 화면 아래에 옴 = 노란선을 지나 도로에 나옴 -> 정지
+@@ -1935,6 +2032,11 @@
+ 
+   void watchdog()
+   {
++    if (handover_ticks_ > 0)
++    {
++      handover_ticks_--;
++      publish_mode(ControlMode::LANE, "leave_done");
++    }
+     if (!i_am_driving())
+     {
+       return;
+@@ -2022,11 +2124,11 @@
+       case State::APPROACH:
+         return "approach";
+       case State::EXTRA:
+-        return "extra";
++        return leaving_ ? "leave_straight" : "extra";
+       case State::TURN:
+         return "turn";
+       case State::ENTRY_ARC:
+-        return "entry_arc";
++        return leaving_ ? "leave_arc" : "entry_arc";
+       case State::STEM:
+         return "stem";
+       case State::SIDE_FORWARD:
+@@ -2190,6 +2292,10 @@
+   int64_t exit_stop_y_;
+   double exit_white_max_tilt_deg_;
+   double exit_timeout_;
++  bool leave_turn_;
++  double leave_forward_m_;
++  int64_t leave_yellow_frames_;
++  double leave_rearm_delay_;
+   double front_stop_distance_;
+   double image_timeout_;
+   double approach_timeout_;
+@@ -2247,6 +2353,12 @@
+   int64_t exit_cam_lost_ = 0;      // EXIT_ARC 중 직선을 연속으로 못 찾은 프레임 수
+   double exit_cam_sum_ = 0.0;      // EXIT_ARC 중 카메라로 잰 돈 각도 합 (부호 있음) [rad]
+   double exit_white_y_ = -1.0;     // EXIT_STEM 중 바로 전 영상의 가로 흰 선 줄 번호 (-1 = 없음)
++  bool leaving_ = false;           // 도로로 나가는 곡선 중인지 (EXTRA / ENTRY_ARC 를 같이 쓴다)
++  int64_t leave_present_ = 0;      // EXIT_STEM 중 왼쪽 아래 노란선이 연속으로 보인 프레임 수
++  bool leave_seen_ = false;        // EXIT_STEM 중 왼쪽 아래 노란선을 봤는지 (본 뒤에 끊겨야 도로)
++  int64_t leave_empty_ = 0;        // 그 뒤 연속으로 안 보인 프레임 수
++  int64_t handover_ticks_ = 0;     // LANE 을 몇 번 더 보낼지 (0.1초마다)
++  double rearm_until_s_ = 0.0;     // 이 시각 [s] 전에는 주차 표지판 무시
+   double odom_yaw_ = 0.0;          // odom 방향 [rad]
+   bool odom_received_ = false;
+   rclcpp::Time last_odom_time_;

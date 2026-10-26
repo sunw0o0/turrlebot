@@ -147,6 +147,14 @@ parking:
     exit_white_max_tilt_deg: 30.0   # 로봇이 비스듬해서 도로 흰선이 이만큼까지 기울어 보여도 찾음
     exit_timeout: 20.0              # [s] 길을 내려가는 데 이보다 오래 걸리면 멈춤
 
+    # 9-1) 길을 내려와 도로로 나가기: 들어갈 때 (5-1) 와 같은 방법으로 왼쪽 곡선 -> 일반 주행 (LANE)
+    #      왼쪽 아래 노란선이 보이다가 끊기면 -> (0.33 - entry_arc_radius_m + entry_forward_m + leave_forward_m) 직진
+    #      -> 왼쪽 곡선 (반지름 / 속도 / gain 은 5-1 과 같음) -> 도로 노란선이 세로가 되면 control_mode = LANE
+    leave_turn: true                # false 면 예전처럼 도로 흰선에서 멈춤 (STOP "exited")
+    leave_forward_m: 0.0            # [m] 나갈 때만 꺾기 시작 조절 (+ 늦게, - 일찍). entry_forward_m 에 더해짐
+    leave_yellow_frames: 2          # 왼쪽 노란선을 이만큼 연속 본 뒤에 끊겨야 "도로" 로 봄
+    leave_rearm_delay: 20.0         # [s] 나온 뒤 이 시간 동안은 주차 표지판을 무시 (같은 표지판 보고 또 들어가지 않게)
+
     # 안전
     front_stop_distance: 0.10       # [m]
     image_timeout: 0.5              # [s]
