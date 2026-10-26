@@ -179,3 +179,13 @@ cd ~/Robit_intelligence_turtlebot_team
 git apply --check ~/turrlebot/team_patch/entry_arc.patch && git apply ~/turrlebot/team_patch/entry_arc.patch
 cd colcon_ws && colcon build --packages-select lane_follower
 ```
+
+### side_arc.patch - 장애물 쪽 90도: 격자 맞추기 + 뒤로 가는 곡선 (entry_arc.patch 다음에 적용)
+- 90도를 언제 멈추나: 주차장 선(직각 격자)이 화면에서 다시 가로/세로로 서면 멈춤 (side_snap)
+- 제자리 90도 + 후진 대신 뒤로 가면서 곡선 한 번으로 칸에 들어감 (side_arc, 반지름 side_arc_radius_m)
+```bash
+cd ~/turrlebot && git pull
+cd ~/Robit_intelligence_turtlebot_team
+git apply --check ~/turrlebot/team_patch/side_arc.patch && git apply ~/turrlebot/team_patch/side_arc.patch
+cd colcon_ws && colcon build --packages-select lane_follower
+```

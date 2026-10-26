@@ -1,0 +1,493 @@
+--- a/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 20:58:43.721847674 +0000
++++ b/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 20:58:43.723780264 +0000
+@@ -61,6 +61,18 @@
+ //          │    (side_turn_toward: false 면 반대쪽으로)
+ //          │  (각도: 화면의 직선(흰선/노란선)들이 돈 각도를 카메라로 잰다. 못 재면 odom, odom 도 없으면 "속도 x 시간")
+ //          ▼
++//   ※ side_arc: true (기본) 면 "제자리 90도 + 후진" 대신 뒤로 가면서 도는 곡선 한 번으로 칸에 들어간다:
++//      (4-0) SIDE_FORWARD : 곡선 반지름(side_arc_radius_m) + side_arc_forward_m 만큼 더 올라감
++//                           (뒤로 곡선을 그리면 반지름만큼 다시 내려오므로)
++//      (4-1) SIDE_TURN    : 뒤로 가면서 장애물 쪽으로 90도 (side_arc_speed, 반지름 side_arc_radius_m)
++//                           -> 다 돌면 반대쪽 칸 안에서 장애물 쪽을 보고 있다
++//      (4-2) BACKUP       : side_arc_backup_time 초 더 후진 (0 이면 건너뜀)
++//
++//   90도를 언제 멈추나 (제자리 / 곡선 모두):
++//      주차장의 선(서로 직각인 격자)은 0도와 90도에서 화면에 가로/세로로 똑바로 서고 45도에서 가장 틀어진다.
++//      45도를 지난 뒤 격자가 다시 똑바로 서면 멈춘다 (격자 맞추기, side_snap)
++//      -> 각도를 더해 가는 오차가 쌓여도 멈추는 방향은 매번 같다
++//
+ //   (4-2) BACKUP : 90도 돈 뒤 backup_time (3초) 동안 backup_speed 로 후진
+ //          │        (exit_enable: false 면 여기서 멈춤 - STOP "parking_node:turned_left_backed" / "turned_right_backed")
+ //          ▼
+@@ -157,7 +169,8 @@
+     TURN,        // 입구에서 왼쪽으로 도는 중 (이 노드가 운전)
+     ENTRY_ARC,   // 입구로 곡선을 그리며 왼쪽으로 들어가는 중 (entry_arc: true 일 때, 이 노드가 운전)
+     STEM,        // 주차장 길 -> 통로를 두 차선(노란선 / 흰 점선) 가운데로 올라가는 중 (이 노드가 운전)
+-    SIDE_TURN,   // 장애물 쪽으로 90도 도는 중 (이 노드가 운전)
++    SIDE_FORWARD,  // 뒤로 곡선을 그리기 전에 반지름만큼 더 올라가는 중 (side_arc: true, 이 노드가 운전)
++    SIDE_TURN,   // 장애물 쪽으로 90도 도는 중 (제자리, 또는 side_arc 면 뒤로 가면서. 이 노드가 운전)
+     BACKUP,      // 90도 돈 뒤 backup_time 초 후진 (이 노드가 운전)
+     EXIT_ARC,    // 두 바퀴 다 앞으로, 곡선으로 90도 돌아 길 쪽 보기 (이 노드가 운전)
+     EXIT_STEM,   // 들어왔던 길을 반대로 내려가 도로로 나가기 (이 노드가 운전)
+@@ -327,6 +340,20 @@
+     side_tolerance_deg_ = declare_parameter("side_tolerance_deg", 1.0);
+     odom_timeout_ = declare_parameter("odom_timeout", 0.5);
+ 
++    // 7-1) 90도 멈추는 기준: 격자 맞추기
++    side_snap_ = declare_parameter("side_snap", true);
++    side_snap_rough_deg_ = declare_parameter("side_snap_rough_deg", 70.0);
++    side_snap_min_ratio_ = declare_parameter("side_snap_min_ratio", 0.5);
++    side_snap_max_extra_deg_ = declare_parameter("side_snap_max_extra_deg", 30.0);
++
++    // 7-2) 제자리 90도 + 후진 대신 뒤로 가면서 곡선으로 칸에 들어가기
++    side_arc_ = declare_parameter("side_arc", true);
++    side_arc_radius_m_ = declare_parameter("side_arc_radius_m", 0.12);
++    side_arc_radius_gain_ = declare_parameter("side_arc_radius_gain", 1.0);
++    side_arc_speed_ = declare_parameter("side_arc_speed", 0.06);
++    side_arc_forward_m_ = declare_parameter("side_arc_forward_m", 0.0);
++    side_arc_backup_time_ = declare_parameter("side_arc_backup_time", 0.0);
++
+     // 8) 90도 돈 뒤 후진
+     backup_time_ = declare_parameter("backup_time", 3.0);
+     backup_speed_ = declare_parameter("backup_speed", 0.06);
+@@ -461,6 +488,22 @@
+       cv::bitwise_or(yellow, white_mask(lab), lines_mask);
+       entry_arc_step(yellow, lines_mask);
+     }
++    else if (state_ == State::SIDE_FORWARD)
++    {
++      // 반지름만큼 더 올라가는 동안에도 두 차선 가운데로. 돌기 시작할 때 쓸 직선 방향 분포도 계속 저장
++      const cv::Mat white = white_mask(lab);
++      cv::Mat lines;
++      cv::bitwise_or(yellow, white, lines);
++      if (side_cam_)
++      {
++        std::vector<double> angles = scene_line_angles(lines);
++        if (!angles.empty())
++        {
++          last_scene_angles_ = angles;   // 주차장 끝 너머라 직선이 안 보이면 마지막으로 본 것을 둔다
++        }
++      }
++      drive_between_lines(lines, false);
++    }
+     else if (state_ == State::SIDE_TURN)
+     {
+       if (side_use_cam_)
+@@ -1079,12 +1122,42 @@
+   }
+ 
+   // 장애물을 본 쪽으로 (toward = false 면 반대쪽으로) 돌기 시작
++  //   side_arc 면 먼저 반지름만큼 더 올라간 뒤 (SIDE_FORWARD) 뒤로 곡선
+   void turn_toward_seen_side()
+   {
+     const double toward = side_turn_toward_ ? 1.0 : -1.0;
++    if (side_arc_)
++    {
++      start_side_forward(side_seen_ * toward);
++      return;
++    }
+     start_side_turn(side_seen_ * toward);
+   }
+ 
++  // 뒤로 곡선을 그리면 로봇이 반지름만큼 통로 아래쪽으로도 내려온다.
++  // 그래서 제자리에서 돌던 곳보다 (side_arc_radius_m + side_arc_forward_m) 더 올라간 뒤 곡선을 시작한다
++  void start_side_forward(double direction)
++  {
++    side_direction_ = direction;
++    const double extra_m = std::max(0.0, side_arc_radius_m_ + side_arc_forward_m_);
++    side_forward_time_ = extra_m / speed_;
++    state_ = State::SIDE_FORWARD;
++    state_time_ = 0.0;
++    lines_missing_ = 0;
++    RCLCPP_INFO(get_logger(), "%.1fcm 더 올라간 뒤 뒤로 가면서 %s으로 곡선", extra_m * 100.0,
++      direction < 0.0 ? "오른쪽" : "왼쪽");
++    if (side_forward_time_ <= 0.0)
++    {
++      end_side_forward();
++    }
++  }
++
++  void end_side_forward()
++  {
++    side_prev_angles_ = last_scene_angles_;   // 돌기 시작할 때의 직선 방향 분포 (카메라로 각도 잴 기준)
++    start_side_turn(side_direction_);
++  }
++
+   // 앞의 가로 흰 선(주차장 끝 테두리)이 화면에서 사라지기 직전인지 보고, 그렇다면
+   //   장애물을 본 쪽이 있으면 그쪽으로 돌기 시작, 없으면 멈춤. 무언가 했으면 true
+   //   "사라지기 직전" = (1) 흰 선이 white_trigger_y 줄보다 아래에 보임, 또는
+@@ -1202,58 +1275,190 @@
+     state_ = State::SIDE_TURN;
+     state_time_ = 0.0;
+     side_direction_ = direction;
+-    side_turn_time_ = (side_turn_deg_ * M_PI / 180.0) / side_turn_speed_;          // odom 도 카메라도 없을 때
+-    side_turn_limit_ = (side_turn_deg_ * M_PI / 180.0) / side_min_speed_ * 1.5;    // 너무 오래 걸리면 포기
++    side_arc_radius_cmd_ = std::max(side_arc_radius_m_ * side_arc_radius_gain_, 0.05);
++    // 가장 빠를 때 / 가장 느릴 때 회전 속도 [rad/s] (곡선이면 뒤 속도 / 반지름)
++    const double w_max = side_arc_ ? side_arc_speed_ / side_arc_radius_cmd_ : side_turn_speed_;
++    const double w_min = w_max * side_min_speed_ / side_turn_speed_;
++    side_turn_time_ = (side_turn_deg_ * M_PI / 180.0) / w_max;          // odom 도 카메라도 없을 때
++    side_turn_limit_ = (side_turn_deg_ * M_PI / 180.0) / w_min * 1.5;    // 너무 오래 걸리면 포기
++    side_snapping_ = false;
++    side_snap_logged_ = false;
++    side_rough_ = 0.0;
++    side_w_cmd_ = 0.0;
+     left_hits_ = 0;
+     right_hits_ = 0;
+     side_use_odom_ = odom_received_ && (now() - last_odom_time_).seconds() < odom_timeout_;
+     side_start_yaw_ = odom_yaw_;
+     side_turned_ = 0.0;
+     // 가로 흰 선을 보고 돌기 시작했으면: 화면의 직선들이 돈 각도로 잰다 (카메라)
+-    side_use_cam_ = side_cam_ && !side_prev_angles_.empty();
+-    side_cam_lost_ = 0;
++    //   (뒤로 곡선이면 시작할 때 화면에 직선이 없을 수 있다 -> 보일 때까지는 시간으로 어림하고 카메라로 이어서 잰다)
++    side_use_cam_ = side_cam_ && (side_arc_ || !side_prev_angles_.empty());
++    side_cam_lost_ = side_prev_angles_.empty() ? 1 : 0;
++    side_grid_seen_ = false;
+     side_cam_turned_ = 0.0;
+     side_cam_sum_ = 0.0;
+     const char * how = side_use_cam_ ? "카메라 (화면 직선들이 돈 각도) 로 잼" :
+       (side_use_odom_ ? "odom 으로 각도 잼" : "odom 없음 -> 시간으로");
+-    RCLCPP_INFO(get_logger(), "%s으로 %.0f도 회전 시작 (%s)", direction < 0.0 ? "오른쪽" : "왼쪽",
+-      side_turn_deg_, how);
++    if (side_arc_)
++    {
++      RCLCPP_INFO(get_logger(), "뒤로 가면서 %s으로 %.0f도 곡선 시작 (반지름 %.0fcm, 명령 반지름 %.0fcm, 뒤 속도 %.2fm/s, %s)",
++        direction < 0.0 ? "오른쪽" : "왼쪽", side_turn_deg_, side_arc_radius_m_ * 100.0,
++        side_arc_radius_cmd_ * 100.0, side_arc_speed_, how);
++    }
++    else
++    {
++      RCLCPP_INFO(get_logger(), "%s으로 %.0f도 회전 시작 (%s)", direction < 0.0 ? "오른쪽" : "왼쪽",
++        side_turn_deg_, how);
++    }
++    side_drive(side_turn_deg_ * M_PI / 180.0);
++  }
++
++  // SIDE_TURN 바퀴 명령. remain: 남은 각도 [rad] (작을수록 느려짐)
++  //   제자리: 회전 속도 side_speed_for(remain)
++  //   곡선  : 같은 비율로 뒤 속도를 줄이고, 회전 = 뒤 속도 / 명령 반지름 (반지름은 그대로)
++  void side_drive(double remain)
++  {
++    const double w = side_speed_for(remain);
++    if (!side_arc_)
++    {
++      side_w_cmd_ = w;
++      drive(0.0, side_direction_ * w);
++      return;
++    }
++    const double v = side_arc_speed_ * w / side_turn_speed_;
++    side_w_cmd_ = v / side_arc_radius_cmd_;
++    drive(-v, side_direction_ * side_w_cmd_);
+   }
+ 
+   // 영상이 올 때마다 (SIDE_TURN + 카메라 사용 중):
+-  //   로봇이 제자리에서 돌면 화면(BEV)의 모든 직선이 같은 각도만큼 돈다.
+-  //   그래서 바로 전 영상과 이번 영상의 직선 방향 분포를 비교해 "이번에 더 돈 각도" 를 구하고 계속 더한다.
+-  //   (선 하나가 화면 밖으로 나가도 다른 선으로 이어서 잴 수 있다)
+-  //   더한 각도가 목표(side_turn_deg)가 되면 멈춤. 직선을 연속 side_cam_lost_frames 번 못 찾으면 odom 으로
++  //   (1) 대략 얼마나 돌았나 (side_rough_):
++  //       바로 전 영상과 이번 영상의 직선 방향 분포를 비교해 "이번에 더 돈 각도" 를 계속 더한다.
++  //       화면에 직선이 안 보이는 동안은 "명령한 회전 속도 x 시간" 으로 더한다 (step_side_turn)
++  //   (2) 격자 맞추기 (side_snap): 주차장 선들은 서로 직각이라
++  //       돌기 시작할 때 (0도) 와 다 돌았을 때 (90도) 화면 선들이 가로/세로로 똑바로 서고, 45도에서 가장 틀어진다.
++  //       "남은 각도" = 격자 틀어짐을 도는 방향으로 본 값 (45도 지나면 + 45 -> 0, 90도를 지나치면 -)
++  //       -> 중간(45도)을 지난 걸 확인한 뒤 (남은 각도가 15 ~ 45도로 보였거나, 대략 side_snap_rough_deg 넘게 돌았음)
++  //          남은 각도가 side_tolerance_deg 이하가 되면 멈춘다. 오차가 쌓이지 않아서 매번 같은 방향으로 선다
++  //   (3) 격자가 끝내 안 보이면: 대략 돈 각도가 side_turn_deg (격자 맞추기 중이면 + side_snap_max_extra_deg) 면 멈춤
+   void side_turn_by_camera(const cv::Mat & lines_mask)
+   {
+     const std::vector<double> now_angles = scene_line_angles(lines_mask);
+-    const std::optional<double> step = rotation_between(side_prev_angles_, now_angles);
+-    if (!now_angles.empty())
++    if (now_angles.empty())
+     {
+-      side_prev_angles_ = now_angles;   // 다음 영상과 비교할 기준
++      side_cam_lost_++;          // 직선이 안 보임: 그동안은 step_side_turn() 이 시간으로 더한다
+     }
+-    if (!step)
++    else
+     {
+-      side_cam_lost_++;
+-      if (side_cam_lost_ >= side_cam_lost_frames_)
++      // 바로 전 영상에도 직선이 있었을 때만 비교 (오래 안 보였으면 그 사이 많이 돌았을 수 있어서 새로 시작)
++      if (side_cam_lost_ == 0)
+       {
+-        side_use_cam_ = false;
+-        RCLCPP_WARN(get_logger(), "회전 중 직선을 놓침 (카메라로 %.1f도) -> %s 으로 이어서 잼",
+-          side_cam_turned_ * 180.0 / M_PI, side_use_odom_ ? "odom" : "시간");
+-      }
+-      return;                    // 바퀴는 마지막 명령대로 계속 돈다
+-    }
+-    side_cam_lost_ = 0;
+-    side_cam_sum_ += *step;
+-    side_cam_turned_ = std::abs(side_cam_sum_);
+-    const double remain = side_turn_deg_ * M_PI / 180.0 - side_cam_turned_;
+-    if (remain <= side_tolerance_deg_ * M_PI / 180.0)
++        const std::optional<double> step = rotation_between(side_prev_angles_, now_angles);
++        if (step)
++        {
++          side_rough_ += std::abs(*step);
++        }
++      }
++      side_prev_angles_ = now_angles;
++      side_cam_lost_ = 0;
++    }
++    side_cam_turned_ = side_rough_;
++    const double deg = M_PI / 180.0;
++
++    std::optional<double> snap_remain;
++    if (side_snap_)
++    {
++      const std::optional<double> tilt = grid_tilt(now_angles);
++      if (tilt)
++      {
++        snap_remain = -side_direction_ * *tilt;   // 도는 방향으로 본 남은 각도 (-45 ~ +45도)
++        side_snap_tilt_ = *tilt;
++        side_grid_seen_ = true;
++        if (!side_snapping_ && side_rough_ >= 20.0 * deg && *snap_remain >= 15.0 * deg)
++        {
++          side_snapping_ = true;   // 45도를 지나 남은 각도가 줄어드는 중인 걸 화면으로 확인
++        }
++      }
++      if (!side_snapping_ && side_rough_ >= side_snap_rough_deg_ * deg)
++      {
++        side_snapping_ = true;     // 화면으로는 못 봤지만 대략 70도 넘게 돌았음
++      }
++      if (side_snapping_ && !side_snap_logged_)
++      {
++        side_snap_logged_ = true;
++        RCLCPP_INFO(get_logger(), "격자 맞추기 (대략 %.1f도 돎%s)", side_rough_ / deg,
++          snap_remain ? "" : ", 아직 격자 안 보임");
++      }
++    }
++
++    if (side_snapping_ && snap_remain)
+     {
++      if (*snap_remain <= side_tolerance_deg_ * deg)
++      {
++        end_side_turn();         // 격자가 똑바로 섬 (조금 지나쳤어도 여기서 멈춤)
++        return;
++      }
++      side_drive(*snap_remain);
++      return;
++    }
++
++    // 격자가 보이던 중이면 조금 더 (side_snap_max_extra_deg) 돌며 기다리고, 한 번도 못 봤으면 대략 90도에서 멈춤
++    const double limit = side_grid_seen_ ? side_turn_deg_ + side_snap_max_extra_deg_ : side_turn_deg_ - side_tolerance_deg_;
++    if (side_rough_ >= limit * deg)
++    {
++      if (side_snap_)
++      {
++        RCLCPP_WARN(get_logger(), "격자를 못 찾음 -> 대략 %.1f도에서 멈춤", side_rough_ / deg);
++      }
+       end_side_turn();
+       return;
+     }
+-    drive(0.0, side_direction_ * side_speed_for(remain));
++    side_drive(std::max(side_turn_deg_ * deg - side_rough_, side_tolerance_deg_ * deg));
++  }
++
++  // 화면 선들이 가로/세로에서 얼마나 틀어져 있는지 [rad] (-45도 ~ +45도). 직각 격자가 안 보이면 비어 있음
++  //   주차장의 선들은 서로 직각이라, 로봇이 격자에 맞게 서 있으면 직선 방향 분포가 0도(가로)와 90도(세로)에 몰린다.
++  //   0 ~ 89도 중 "그 각도 근처 + 그 각도 + 90도 근처" 의 길이 합이 가장 큰 각도를 찾는다 (소수점까지 다듬음)
++  //   그 합이 전체의 side_snap_min_ratio 보다 작으면 격자가 아닌 걸로 본다
++  std::optional<double> grid_tilt(const std::vector<double> & hist) const
++  {
++    if (hist.size() != 180)
++    {
++      return std::nullopt;
++    }
++    double total = 0.0;
++    for (const double h : hist)
++    {
++      total += h;
++    }
++    // 분포를 ±2칸 번지게 만들었으니 점수도 ±2칸을 합쳐서 본다
++    std::vector<double> score(90, 0.0);
++    for (int k = 0; k < 90; k++)
++    {
++      for (int j = -2; j <= 2; j++)
++      {
++        score[k] += hist[(k + j + 180) % 180] + hist[(k + 90 + j + 180) % 180];
++      }
++    }
++    const int best = static_cast<int>(std::max_element(score.begin(), score.end()) - score.begin());
++    if (total <= 0.0 || score[best] < total * side_snap_min_ratio_)
++    {
++      return std::nullopt;
++    }
++    // 꼭짓점 양옆 점수로 소수점 위치 (90도마다 반복되니 양 끝은 이어서 본다)
++    const double l = score[(best + 89) % 90];
++    const double c = score[best];
++    const double r = score[(best + 1) % 90];
++    double deg = best;
++    const double denom = l - 2.0 * c + r;
++    if (std::abs(denom) > 1e-9)
++    {
++      deg += 0.5 * (l - r) / denom;
++    }
++    if (deg >= 45.0)
++    {
++      deg -= 90.0;               // 0 ~ 90 -> -45 ~ 45
++    }
++    return deg * M_PI / 180.0;
+   }
+ 
+   // 화면(흰선 + 노란선)의 직선 방향 분포: 180칸(1칸 = 1도), 각 칸 = 그 방향 직선 조각들의 길이 합
+@@ -1346,8 +1551,7 @@
+       return;
+     }
+     // 남은 각도에 비례해서 느려진다 (지나치지 않게). 너무 느리면 안 돌아서 최소 속도
+-    const double w = side_speed_for(remain);
+-    drive(0.0, side_direction_ * w);
++    side_drive(remain);
+   }
+ 
+   // 0.1초마다: odom 을 안 쓰면 시간으로 돌기. odom 을 써도 너무 오래 걸리면 (odom 끊김 등) 멈춤
+@@ -1359,6 +1563,11 @@
+       {
+         stop_wheels();
+         give_up("카메라로 회전 중 너무 오래 걸림");
++        return;
++      }
++      if (side_cam_lost_ > 0)
++      {
++        side_rough_ += std::abs(side_w_cmd_) * 0.1;   // 직선이 안 보이는 동안: 명령한 회전 속도 x 0.1초
+       }
+       return;                    // 바퀴 명령은 영상이 올 때마다 side_turn_by_camera() 가 보낸다
+     }
+@@ -1376,14 +1585,20 @@
+       end_side_turn();
+       return;
+     }
+-    drive(0.0, side_direction_ * side_turn_speed_);
++    side_drive(side_turn_deg_ * M_PI / 180.0);   // 시간으로 돌 때는 늘 최고 속도
+   }
+ 
+   void end_side_turn()
+   {
+     stop_wheels();
+     const bool right = side_direction_ < 0.0;
+-    if (side_use_cam_)
++    if (side_use_cam_ && side_snapping_)
++    {
++      RCLCPP_INFO(get_logger(), "%s으로 대략 %.1f도 돌았음 (격자 맞추기, 남은 틀어짐 %.1f도, odom %.1f도)",
++        right ? "오른쪽" : "왼쪽", side_cam_turned_ * 180.0 / M_PI, side_snap_tilt_ * 180.0 / M_PI,
++        side_turned_ * 180.0 / M_PI);
++    }
++    else if (side_use_cam_)
+     {
+       RCLCPP_INFO(get_logger(), "%s으로 %.1f도 돌았음 (카메라, odom %.1f도)",
+         right ? "오른쪽" : "왼쪽", side_cam_turned_ * 180.0 / M_PI, side_turned_ * 180.0 / M_PI);
+@@ -1403,23 +1618,25 @@
+   // ==================== (6) BACKUP: 90도 돈 뒤 후진 ====================
+ 
+   // backup_time 초 동안 backup_speed 로 뒤로 간다 (뒤에는 센서가 없으니 천천히). 0 이면 바로 끝
++  //   side_arc (뒤로 곡선) 로 칸에 들어왔으면 side_arc_backup_time 초만 (기본 0 = 후진 안 함)
+   void start_backup()
+   {
+-    if (backup_time_ <= 0.0)
++    backup_duration_ = side_arc_ ? side_arc_backup_time_ : backup_time_;
++    if (backup_duration_ <= 0.0)
+     {
+       finish_backup();
+       return;
+     }
+     state_ = State::BACKUP;
+     state_time_ = 0.0;
+-    RCLCPP_INFO(get_logger(), "%.1f초 후진", backup_time_);
++    RCLCPP_INFO(get_logger(), "%.1f초 후진", backup_duration_);
+     drive(-backup_speed_, 0.0);
+   }
+ 
+   // 0.1초마다: 시간이 될 때까지 후진, 다 되면 멈춤
+   void step_backup()
+   {
+-    if (state_time_ >= backup_time_)
++    if (state_time_ >= backup_duration_)
+     {
+       finish_backup();
+       return;
+@@ -1453,7 +1670,11 @@
+     double radius = exit_arc_radius_m_;
+     if (radius <= 0.0)
+     {
+-      radius = backup_speed_ * std::max(0.0, backup_time_) * exit_arc_radius_gain_;
++      // 통로 가운데에서 칸 안으로 들어간 거리: 뒤로 곡선이면 곡선 반지름 + 더 후진한 거리, 아니면 후진한 거리
++      const double into_slot = side_arc_ ?
++        side_arc_radius_m_ + backup_speed_ * std::max(0.0, side_arc_backup_time_) :
++        backup_speed_ * std::max(0.0, backup_time_);
++      radius = into_slot * exit_arc_radius_gain_;
+     }
+     if (radius < exit_arc_min_radius_m_)
+     {
+@@ -1730,6 +1951,11 @@
+       give_up("길 끝을 못 찾음 (stem_timeout)");
+       return;
+     }
++    if (state_ == State::SIDE_FORWARD && state_time_ >= side_forward_time_)
++    {
++      end_side_forward();
++      return;
++    }
+     if (state_ == State::SIDE_TURN)
+     {
+       step_side_turn();          // 시간으로 도는 거라 영상이 없어도 계속
+@@ -1765,7 +1991,8 @@
+   {
+     return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN ||
+            state_ == State::ENTRY_ARC ||
+-           state_ == State::STEM || state_ == State::SIDE_TURN || state_ == State::BACKUP ||
++           state_ == State::STEM || state_ == State::SIDE_FORWARD || state_ == State::SIDE_TURN ||
++           state_ == State::BACKUP ||
+            state_ == State::EXIT_ARC || state_ == State::EXIT_STEM;
+   }
+ 
+@@ -1784,7 +2011,13 @@
+         return "entry_arc";
+       case State::STEM:
+         return "stem";
++      case State::SIDE_FORWARD:
++        return "side_forward";
+       case State::SIDE_TURN:
++        if (side_arc_)
++        {
++          return side_direction_ < 0.0 ? "side_arc_right" : "side_arc_left";
++        }
+         return side_direction_ < 0.0 ? "side_turn_right" : "side_turn_left";
+       case State::BACKUP:
+         return "backup";
+@@ -1913,6 +2146,16 @@
+   double side_min_speed_;
+   double side_tolerance_deg_;
+   double odom_timeout_;
++  bool side_snap_;
++  double side_snap_rough_deg_;
++  double side_snap_min_ratio_;
++  double side_snap_max_extra_deg_;
++  bool side_arc_;
++  double side_arc_radius_m_;
++  double side_arc_radius_gain_;
++  double side_arc_speed_;
++  double side_arc_forward_m_;
++  double side_arc_backup_time_;
+   double backup_time_;
+   double backup_speed_;
+   bool exit_enable_;
+@@ -1949,6 +2192,15 @@
+   double last_white_y_ = -1.0;     // 바로 전 영상에서 가로 흰 선의 줄 번호 (-1 = 없음)
+   std::vector<double> last_scene_angles_;  // STEM 중 바로 전 영상의 직선 방향 분포 (180칸)
+   double side_direction_ = 0.0;    // SIDE_TURN 방향 (+1 왼쪽, -1 오른쪽)
++  double side_forward_time_ = 0.0; // SIDE_FORWARD 시간 [s]
++  double side_arc_radius_cmd_ = 0.1;   // SIDE_TURN 곡선의 명령 반지름 [m] (side_arc)
++  bool side_snapping_ = false;     // SIDE_TURN 중 45도를 지나 격자 맞추기를 시작했는지
++  bool side_snap_logged_ = false;
++  bool side_grid_seen_ = false;    // SIDE_TURN 중 격자를 한 번이라도 봤는지
++  double side_rough_ = 0.0;        // SIDE_TURN 중 대략 돈 각도 [rad] (카메라 + 직선 안 보일 때 시간)
++  double side_w_cmd_ = 0.0;        // SIDE_TURN 마지막으로 명령한 회전 속도 크기 [rad/s]
++  double side_snap_tilt_ = 0.0;    // 마지막으로 잰 격자 틀어짐 [rad]
++  double backup_duration_ = 0.0;   // 이번 BACKUP 시간 [s]
+   double side_turn_time_ = 0.0;    // SIDE_TURN 할 시간 [s] (odom 없을 때)
+   double side_turn_limit_ = 0.0;   // SIDE_TURN 최대 시간 [s] (넘으면 포기)
+   bool side_use_odom_ = false;     // SIDE_TURN 을 odom 으로 재는지
