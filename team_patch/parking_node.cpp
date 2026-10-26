@@ -349,6 +349,7 @@ private:
     side_snap_rough_deg_ = declare_parameter("side_snap_rough_deg", 70.0);
     side_snap_min_ratio_ = declare_parameter("side_snap_min_ratio", 0.5);
     side_snap_max_extra_deg_ = declare_parameter("side_snap_max_extra_deg", 30.0);
+    side_snap_overshoot_deg_ = declare_parameter("side_snap_overshoot_deg", 15.0);
 
     // 7-2) 제자리 90도 + 후진 대신 뒤로 가면서 곡선으로 칸에 들어가기
     side_arc_ = declare_parameter("side_arc", true);
@@ -1334,6 +1335,7 @@ private:
     side_turn_limit_ = (side_turn_deg_ * M_PI / 180.0) / w_min * 1.5;    // 너무 오래 걸리면 포기
     side_snapping_ = false;
     side_snap_logged_ = false;
+    side_snap_early_logged_ = false;
     side_rough_ = 0.0;
     side_w_cmd_ = 0.0;
     left_hits_ = 0;
@@ -1443,6 +1445,19 @@ private:
 
     if (side_snapping_ && snap_remain)
     {
+      // 한 영상 사이에 side_snap_overshoot_deg (15도) 넘게 지나칠 수는 없다.
+      // 그보다 많이 "지나친" 걸로 보이면 사실은 아직 45도 전 (대략 돈 각도를 너무 크게 어림함) -> 최고 속도로 계속
+      if (*snap_remain < -side_snap_overshoot_deg_ * deg)
+      {
+        if (!side_snap_early_logged_)
+        {
+          side_snap_early_logged_ = true;
+          RCLCPP_WARN(get_logger(), "격자가 %.1f도 지나친 걸로 보임 -> 아직 45도 전으로 보고 계속 돎 (대략 %.1f도)",
+            -*snap_remain / deg, side_rough_ / deg);
+        }
+        side_drive(side_turn_deg_ * deg);
+        return;
+      }
       if (*snap_remain <= side_tolerance_deg_ * deg)
       {
         end_side_turn();         // 격자가 똑바로 섬 (조금 지나쳤어도 여기서 멈춤)
@@ -2270,6 +2285,7 @@ private:
   double side_snap_rough_deg_;
   double side_snap_min_ratio_;
   double side_snap_max_extra_deg_;
+  double side_snap_overshoot_deg_;
   bool side_arc_;
   double side_arc_radius_m_;
   double side_arc_radius_gain_;
@@ -2322,6 +2338,7 @@ private:
   bool side_snapping_ = false;     // SIDE_TURN 중 45도를 지나 격자 맞추기를 시작했는지
   bool side_snap_logged_ = false;
   bool side_grid_seen_ = false;    // SIDE_TURN 중 격자를 한 번이라도 봤는지
+  bool side_snap_early_logged_ = false;
   double side_rough_ = 0.0;        // SIDE_TURN 중 대략 돈 각도 [rad] (카메라 + 직선 안 보일 때 시간)
   double side_w_cmd_ = 0.0;        // SIDE_TURN 마지막으로 명령한 회전 속도 크기 [rad/s]
   double side_snap_tilt_ = 0.0;    // 마지막으로 잰 격자 틀어짐 [rad]
