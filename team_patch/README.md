@@ -170,3 +170,12 @@ parking.yaml 의 robot_y_offset_px 는 bird_eye_view 보정과 같아야 한다 
 -> 두 바퀴 다 앞으로 곡선 90도 (반지름 = 후진 거리, 길의 노란선이 세로가 되면 끝)
 -> 들어왔던 길을 내려가서 도로 흰선이 화면 아래에 오면 STOP ("parking_node:exited").
 곡선부터 안 하려면 parking.yaml 의 `exit_enable: false`.
+
+### entry_arc.patch - 입구를 제자리 회전 대신 곡선으로 (젯슨 parking-camera 브랜치, parking-1 기준)
+젯슨에서 직접 커밋하며 쓰는 parking_node.cpp 에 바뀐 부분만 넣는다 (parking.yaml 은 안 건드림, 새 값은 코드 기본값).
+```bash
+cd ~/turrlebot && git pull
+cd ~/Robit_intelligence_turtlebot_team
+git apply --check ~/turrlebot/team_patch/entry_arc.patch && git apply ~/turrlebot/team_patch/entry_arc.patch
+cd colcon_ws && colcon build --packages-select lane_follower
+```

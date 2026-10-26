@@ -1,0 +1,270 @@
+--- a/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 13:35:33.074520025 +0000
++++ b/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-26 13:35:33.076782976 +0000
+@@ -28,6 +28,18 @@
+ //          ▼
+ //   (2-1) EXTRA  : 남은 거리 / 속도 만큼의 시간 동안 흰선 보고 더 직진 (남은 거리가 0 이면 건너뜀)
+ //          ▼
++//   ※ entry_arc: true (기본) 면 (2) ~ (3) 대신 곡선으로 부드럽게 들어간다:
++//      (2) 에서 왼쪽 아래 노란선이 "끊기는" 순간 (입구가 시작됨, 바퀴 축 ~ 입구 가운데 약 entry_gap_to_center_m)
++//      -> (2-1) (entry_gap_to_center_m - entry_arc_radius_m) 만큼 더 직진
++//      -> (3-1) ENTRY_ARC: 두 바퀴 다 앞으로, 반지름 entry_arc_radius_m 로 왼쪽 곡선
++//               (곡선 중심이 입구 가운데 줄 위에 오므로, 다 돌면 길 가운데로 들어간다)
++//               화면 직선들이 entry_check_deg (45도) 넘게 돈 뒤부터 길의 노란선을 보고,
++//               노란선이 세로가 되면 (4) STEM 으로
++//
++//         ──────●╮        (●: 노란선이 끊긴 곳에서 조금 더 간 곳)
++//                ╰─╮
++//                  │      <- 노란선이 세로로 보이면 곡선 끝
++//
+ //   (3) TURN     : 제자리에서 왼쪽으로 돈다.
+ //          │        BEV 에 입구 길의 노란선 두 개(왼쪽, 오른쪽)가 세로로 똑바로 보이면 다음으로
+ //          │        (aligned_deg 4도 이내. 한 선만 보여도 길 옆선 자리에 세로로 서 있으면 됨)
+@@ -143,6 +155,7 @@
+     APPROACH,    // 흰선 보고 직진하며 입구 찾는 중 (이 노드가 운전)
+     EXTRA,       // 입구 가운데까지 남은 거리만큼 더 직진 (이 노드가 운전)
+     TURN,        // 입구에서 왼쪽으로 도는 중 (이 노드가 운전)
++    ENTRY_ARC,   // 입구로 곡선을 그리며 왼쪽으로 들어가는 중 (entry_arc: true 일 때, 이 노드가 운전)
+     STEM,        // 주차장 길 -> 통로를 두 차선(노란선 / 흰 점선) 가운데로 올라가는 중 (이 노드가 운전)
+     SIDE_TURN,   // 장애물 쪽으로 90도 도는 중 (이 노드가 운전)
+     BACKUP,      // 90도 돈 뒤 backup_time 초 후진 (이 노드가 운전)
+@@ -274,6 +287,15 @@
+     turn_min_time_ = declare_parameter("turn_min_time", 1.0);
+     turn_fit_rows_ = declare_parameter("turn_fit_rows", 230);
+ 
++    // 5-1) 제자리 회전 대신 곡선으로 입구에 들어가기
++    entry_arc_ = declare_parameter("entry_arc", true);
++    entry_gap_to_center_m_ = declare_parameter("entry_gap_to_center_m", 0.33);
++    entry_forward_m_ = declare_parameter("entry_forward_m", 0.0);
++    entry_arc_radius_m_ = declare_parameter("entry_arc_radius_m", 0.25);
++    entry_arc_radius_gain_ = declare_parameter("entry_arc_radius_gain", 2.0);
++    entry_arc_speed_ = declare_parameter("entry_arc_speed", 0.08);
++    entry_check_deg_ = declare_parameter("entry_check_deg", 45.0);
++
+     // 6) 주차장 길 올라가기
+     stem_use_white_ = declare_parameter("stem_use_white", true);
+     same_line_px_ = declare_parameter("same_line_px", 40.0);
+@@ -417,6 +439,11 @@
+         start_extra();
+         return;
+       }
++      if (entry_arc_ && gap_ == Gap::IN_GAP)
++      {
++        start_entry_straight();  // 곡선으로 들어가기: 노란선이 끊기자마자 곡선 시작점까지 직진
++        return;
++      }
+       drive_along_white(white_mask(lab));
+     }
+     else if (state_ == State::EXTRA)
+@@ -427,6 +454,12 @@
+     {
+       turn_until_aligned(yellow);
+     }
++    else if (state_ == State::ENTRY_ARC)
++    {
++      cv::Mat lines_mask;
++      cv::bitwise_or(yellow, white_mask(lab), lines_mask);
++      entry_arc_step(yellow, lines_mask);
++    }
+     else if (state_ == State::SIDE_TURN)
+     {
+       if (side_use_cam_)
+@@ -656,7 +689,7 @@
+     extra_time_ = extra_m / speed_;
+     if (extra_time_ <= 0.0)
+     {
+-      start_turn();
++      start_turn_or_arc();
+       return;
+     }
+     state_ = State::EXTRA;
+@@ -664,6 +697,101 @@
+     RCLCPP_INFO(get_logger(), "입구 가운데까지 %.1fcm 더 직진 (%.1f초)", extra_m * 100.0, extra_time_);
+   }
+ 
++  // ==================== (2-1) 곡선으로 들어가기: 곡선 시작점까지 직진 ====================
++
++  // 왼쪽 아래 노란선이 끊긴 순간 = 바퀴 축이 입구 가운데보다 약 entry_gap_to_center_m 앞.
++  // 반지름 entry_arc_radius_m 인 곡선의 중심이 입구 가운데 줄 위에 오려면, 입구 가운데보다 반지름만큼 앞에서 꺾기 시작
++  //   -> 더 갈 거리 = entry_gap_to_center_m - entry_arc_radius_m + entry_forward_m (음수면 바로 꺾음)
++  void start_entry_straight()
++  {
++    const double extra_m = std::max(0.0, entry_gap_to_center_m_ - entry_arc_radius_m_ + entry_forward_m_);
++    extra_time_ = extra_m / speed_;
++    state_ = State::EXTRA;
++    state_time_ = 0.0;
++    RCLCPP_INFO(get_logger(), "입구 시작 (노란선 끊김) -> %.1fcm 더 직진한 뒤 곡선으로 왼쪽", extra_m * 100.0);
++    if (extra_time_ <= 0.0)
++    {
++      start_turn_or_arc();
++    }
++  }
++
++  // EXTRA 가 끝나면: entry_arc 면 곡선, 아니면 제자리 회전
++  void start_turn_or_arc()
++  {
++    if (entry_arc_)
++    {
++      start_entry_arc();
++      return;
++    }
++    start_turn();
++  }
++
++  // ==================== (3-1) ENTRY_ARC: 곡선으로 왼쪽으로 들어가기 ====================
++
++  // 두 바퀴 다 앞으로: 앞 속도 entry_arc_speed, 회전 = 속도 / (반지름 x entry_arc_radius_gain)
++  //   이 로봇은 회전 명령보다 약 2배 더 돌아서, 명령 반지름을 2배로 줘야 실제로 entry_arc_radius_m 쯤으로 돈다
++  void start_entry_arc()
++  {
++    state_ = State::ENTRY_ARC;
++    state_time_ = 0.0;
++    const double radius_cmd = std::max(entry_arc_radius_m_ * entry_arc_radius_gain_, exit_arc_min_radius_m_);
++    entry_w_ = entry_arc_speed_ / radius_cmd;
++    entry_arc_time_full_ = (M_PI / 2.0) / entry_w_;   // 명령대로 돈다면 90도 걸리는 시간
++    entry_arc_limit_ = entry_arc_time_full_ * 2.5;     // 너무 오래 걸리면 포기
++    entry_prev_angles_.clear();
++    entry_cam_sum_ = 0.0;
++    entry_cam_lost_ = 0;
++    entry_cam_failed_ = false;
++    RCLCPP_INFO(get_logger(), "곡선으로 왼쪽 (반지름 %.0fcm, 명령 반지름 %.0fcm, 속도 %.2fm/s)",
++      entry_arc_radius_m_ * 100.0, radius_cmd * 100.0, entry_arc_speed_);
++    drive(entry_arc_speed_, entry_w_);
++  }
++
++  // 영상이 올 때마다 (ENTRY_ARC):
++  //   (1) 화면 직선들이 돈 각도를 더한다 (SIDE_TURN 과 같은 방법). 처음엔 도로의 노란선이 세로로 보여서
++  //       길의 선으로 착각하지 않게, entry_check_deg (45도) 넘게 돈 뒤부터 (2) 를 본다
++  //       (직선을 계속 못 찾으면: 명령대로 45도 돌 시간이 지난 뒤부터)
++  //   (2) 길의 노란선(화면 위쪽 turn_fit_rows 줄)이 세로 (aligned_deg 이내) 가 되면 -> STEM
++  //       조금 지나쳤어도 (exit_overshoot_deg 이내) STEM 으로 (올라가며 바로잡음)
++  void entry_arc_step(const cv::Mat & yellow, const cv::Mat & lines_mask)
++  {
++    const std::vector<double> now_angles = scene_line_angles(lines_mask);
++    const std::optional<double> step = rotation_between(entry_prev_angles_, now_angles);
++    if (step)
++    {
++      entry_cam_sum_ += *step;
++      entry_cam_lost_ = 0;
++    }
++    else if (!entry_prev_angles_.empty() && ++entry_cam_lost_ >= side_cam_lost_frames_ && !entry_cam_failed_)
++    {
++      entry_cam_failed_ = true;
++      RCLCPP_WARN(get_logger(), "곡선 중 직선을 놓침 (%.1f도) -> 시간으로 어림해서 노란선 보기 시작",
++        std::abs(entry_cam_sum_) * 180.0 / M_PI);
++    }
++    if (!now_angles.empty())
++    {
++      entry_prev_angles_ = now_angles;
++    }
++
++    const bool turned_enough = entry_cam_failed_ ?
++      state_time_ >= entry_arc_time_full_ * 0.5 :
++      std::abs(entry_cam_sum_) >= entry_check_deg_ * M_PI / 180.0;
++    if (turned_enough)
++    {
++      const std::optional<double> lean = yellow_lean(yellow, static_cast<int>(turn_fit_rows_));
++      // 왼쪽으로 돌고 있으니 길의 선은 왼쪽으로 기울어 있다가 (+) 세로 (0) 가 된다
++      if (lean && *lean <= aligned_deg_ * M_PI / 180.0 && *lean >= -exit_overshoot_deg_ * M_PI / 180.0)
++      {
++        RCLCPP_INFO(get_logger(), "곡선 중 길의 노란선이 세로가 됨 (카메라 각도 %.1f도)",
++          std::abs(entry_cam_sum_) * 180.0 / M_PI);
++        stop_wheels();
++        start_stem(*lean);
++        return;
++      }
++    }
++    drive(entry_arc_speed_, entry_w_);
++  }
++
+   // ==================== (3) TURN: 왼쪽으로 돌기 ====================
+ 
+   void start_turn()
+@@ -1365,7 +1493,7 @@
+     exit_yellow_seen_ = false;
+     if (state_time_ >= exit_arc_time_full_ * exit_check_ratio_)
+     {
+-      const std::optional<double> lean = exit_yellow_lean(yellow);
++      const std::optional<double> lean = yellow_lean(yellow, yellow.rows);
+       // 남은 기울기: 왼쪽으로 돌 때는 왼쪽으로 기운 만큼 (+), 오른쪽으로 돌 때는 오른쪽으로 기운 만큼
+       //   한 영상 사이에 exit_overshoot_deg (15도) 넘게 지나칠 수는 없으니, 그보다 많이 지나친 걸로 보이면
+       //   선을 잘못 찾은 것 -> 이번 영상은 노란선이 없는 걸로 친다
+@@ -1429,15 +1557,16 @@
+     drive(exit_arc_speed_, exit_w_);
+   }
+ 
+-  // 들어왔던 길의 노란선 기울기 [rad] (+ 왼쪽으로 기움). 안 보이면 비어 있음
++  // 길의 노란선 기울기 [rad] (+ 왼쪽으로 기움). 화면 맨 위부터 y_end 줄까지만 본다. 안 보이면 비어 있음
++  //   (EXIT_ARC: 들어왔던 길로 나갈 때, ENTRY_ARC: 곡선으로 들어갈 때)
+   //   두 선이 길 폭만큼 떨어져 나란하면 둘의 평균, 아니면 보이는 한 선
+   //   (곡선은 실제 반지름이 조금 달라 옆으로 밀릴 수 있어서 선의 자리는 따지지 않는다)
+   //   점들이 직선에서 exit_line_max_rms_px 보다 많이 벗어난 선(두 노란선이 한쪽 칸에 같이 들어와 섞인 것)은 안 쓴다
+-  std::optional<double> exit_yellow_lean(const cv::Mat & yellow)
++  std::optional<double> yellow_lean(const cv::Mat & yellow, int y_end)
+   {
+     const int mid = static_cast<int>(bev_center_x_ * yellow.cols);
+-    std::optional<Line> left = fit_line(yellow, 0, mid, yellow.rows);
+-    std::optional<Line> right = fit_line(yellow, mid, yellow.cols, yellow.rows);
++    std::optional<Line> left = fit_line(yellow, 0, mid, y_end);
++    std::optional<Line> right = fit_line(yellow, mid, yellow.cols, y_end);
+     if (left && left->rms > exit_line_max_rms_px_)
+     {
+       left.reset();
+@@ -1575,7 +1704,12 @@
+     state_time_ += 0.1;
+     if (state_ == State::EXTRA && state_time_ >= extra_time_)
+     {
+-      start_turn();
++      start_turn_or_arc();
++      return;
++    }
++    if (state_ == State::ENTRY_ARC && state_time_ >= entry_arc_limit_)
++    {
++      give_up("입구 곡선이 너무 오래 걸림 (길의 노란선이 세로로 안 보임)");
+       return;
+     }
+     if (state_ == State::APPROACH && approach_timeout_ > 0.0 && state_time_ >= approach_timeout_)
+@@ -1627,6 +1761,7 @@
+   bool i_am_driving() const
+   {
+     return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN ||
++           state_ == State::ENTRY_ARC ||
+            state_ == State::STEM || state_ == State::SIDE_TURN || state_ == State::BACKUP ||
+            state_ == State::EXIT_ARC || state_ == State::EXIT_STEM;
+   }
+@@ -1642,6 +1777,8 @@
+         return "extra";
+       case State::TURN:
+         return "turn";
++      case State::ENTRY_ARC:
++        return "entry_arc";
+       case State::STEM:
+         return "stem";
+       case State::SIDE_TURN:
+@@ -1739,6 +1876,13 @@
+   double pair_gap_max_px_;
+   double turn_min_time_;
+   int64_t turn_fit_rows_;
++  bool entry_arc_;
++  double entry_gap_to_center_m_;
++  double entry_forward_m_;
++  double entry_arc_radius_m_;
++  double entry_arc_radius_gain_;
++  double entry_arc_speed_;
++  double entry_check_deg_;
+   bool stem_use_white_;
+   double same_line_px_;
+   int64_t stem_end_frames_;
+@@ -1811,6 +1955,13 @@
+   double side_cam_turned_ = 0.0;   // 카메라로 잰 돈 각도 [rad]
+   double side_start_yaw_ = 0.0;    // SIDE_TURN 시작할 때 방향 [rad]
+   double side_turned_ = 0.0;       // 지금까지 돈 각도 [rad]
++  double entry_w_ = 0.0;           // ENTRY_ARC 회전 속도 [rad/s] (+ 왼쪽)
++  double entry_arc_time_full_ = 0.0;  // ENTRY_ARC 명령대로 90도 도는 시간 [s]
++  double entry_arc_limit_ = 0.0;   // ENTRY_ARC 최대 시간 [s] (넘으면 포기)
++  std::vector<double> entry_prev_angles_;  // ENTRY_ARC 중 바로 전 영상의 직선 방향 분포
++  double entry_cam_sum_ = 0.0;     // ENTRY_ARC 중 카메라로 잰 돈 각도 합 [rad]
++  int64_t entry_cam_lost_ = 0;     // ENTRY_ARC 중 직선을 연속으로 못 찾은 프레임 수
++  bool entry_cam_failed_ = false;  // ENTRY_ARC 중 카메라 각도를 포기했는지 (그 뒤로는 시간으로 어림)
+   double exit_w_ = 0.0;            // EXIT_ARC 회전 속도 [rad/s] (+ 왼쪽)
+   double exit_arc_time_ = 0.0;     // EXIT_ARC 를 시간으로 끝낼 때의 시간 [s]
+   double exit_arc_time_full_ = 0.0;  // 처음 계산한 "90도 / 회전 속도" 시간 [s]
