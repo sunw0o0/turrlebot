@@ -68,7 +68,10 @@
 //                           -> 다 돌면 반대쪽 칸 안에서 장애물 쪽을 보고 있다
 //      (4-2) BACKUP       : side_arc_backup_time 초 더 후진 (0 이면 건너뜀)
 //
-//   90도를 언제 멈추나 (제자리 / 곡선 모두):
+//   side_turn_fixed: true (기본) 면 카메라를 안 보고 odom 으로 잰 각도가 side_turn_deg 가 되면 무조건 멈춘다
+//     (odom 이 없으면 "회전 속도 x 시간"). 실제로 덜/더 돌면 side_turn_deg 나 side_odom_scale 로 맞춘다
+//   side_turn_fixed: false 면 아래처럼 카메라로 잰다.
+//   90도를 언제 멈추나 (제자리 / 곡선 모두, 카메라):
 //      주차장의 선(서로 직각인 격자)은 0도와 90도에서 화면에 가로/세로로 똑바로 서고 45도에서 가장 틀어진다.
 //      45도를 지난 뒤 격자가 다시 똑바로 서면 멈춘다 (격자 맞추기, side_snap)
 //      -> 각도를 더해 가는 오차가 쌓여도 멈추는 방향은 매번 같다
@@ -329,6 +332,8 @@ private:
     side_turn_when_ = declare_parameter("side_turn_when", std::string("white"));
     white_trigger_y_ = declare_parameter("white_trigger_y", 350);
     side_cam_ = declare_parameter("side_turn_by_camera", true);
+    side_turn_fixed_ = declare_parameter("side_turn_fixed", true);
+    side_odom_scale_ = declare_parameter("side_odom_scale", 1.0);
     side_cam_min_line_px_ = declare_parameter("side_cam_min_line_px", 60);
     side_cam_max_step_deg_ = declare_parameter("side_cam_max_step_deg", 20.0);
     side_cam_lost_frames_ = declare_parameter("side_cam_lost_frames", 5);
@@ -1345,13 +1350,14 @@ private:
     side_turned_ = 0.0;
     // 가로 흰 선을 보고 돌기 시작했으면: 화면의 직선들이 돈 각도로 잰다 (카메라)
     //   (뒤로 곡선이면 시작할 때 화면에 직선이 없을 수 있다 -> 보일 때까지는 시간으로 어림하고 카메라로 이어서 잰다)
-    side_use_cam_ = side_cam_ && (side_arc_ || !side_prev_angles_.empty());
+    //   side_turn_fixed 면 카메라 / 격자는 안 보고 odom (없으면 시간) 으로 side_turn_deg 만큼만 돈다
+    side_use_cam_ = !side_turn_fixed_ && side_cam_ && (side_arc_ || !side_prev_angles_.empty());
     side_cam_lost_ = side_prev_angles_.empty() ? 1 : 0;
     side_grid_seen_ = false;
     side_cam_turned_ = 0.0;
     side_cam_sum_ = 0.0;
     const char * how = side_use_cam_ ? "카메라 (화면 직선들이 돈 각도) 로 잼" :
-      (side_use_odom_ ? "odom 으로 각도 잼" : "odom 없음 -> 시간으로");
+      (side_use_odom_ ? "odom 으로 각도 잼 (무조건 이 각도)" : "odom 없음 -> 시간으로 (무조건 이 각도)");
     if (side_arc_)
     {
       RCLCPP_INFO(get_logger(), "뒤로 가면서 %s으로 %.0f도 곡선 시작 (반지름 %.0fcm, 명령 반지름 %.0fcm, 뒤 속도 %.2fm/s, %s)",
@@ -1607,9 +1613,10 @@ private:
   }
 
   // odom 이 올 때마다 (SIDE_TURN + odom 사용 중일 때): 돈 각도를 재고, 남은 각도에 맞춰 속도 조절
+  //   side_odom_scale: odom 이 실제보다 작게 / 크게 잴 때 곱하는 배율 (실제 각도 = odom 각도 x 배율)
   void step_side_turn_odom()
   {
-    side_turned_ = std::abs(wrap_angle(odom_yaw_ - side_start_yaw_));
+    side_turned_ = std::abs(wrap_angle(odom_yaw_ - side_start_yaw_)) * side_odom_scale_;
     const double remain = side_turn_deg_ * M_PI / 180.0 - side_turned_;
     if (remain <= side_tolerance_deg_ * M_PI / 180.0)
     {
@@ -2266,6 +2273,8 @@ private:
   bool side_turn_toward_;
   std::string side_turn_when_;
   bool side_cam_;
+  bool side_turn_fixed_;
+  double side_odom_scale_;
   int64_t side_cam_min_line_px_;
   double side_cam_max_step_deg_;
   int64_t side_cam_lost_frames_;
