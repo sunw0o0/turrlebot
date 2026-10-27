@@ -1,5 +1,5 @@
---- a/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-27 10:14:01.742812193 +0000
-+++ b/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-27 10:14:01.745234343 +0000
+--- a/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-27 10:14:16.665313896 +0000
++++ b/colcon_ws/src/lane_follower/src/parking_node.cpp	2026-10-27 10:14:16.668104784 +0000
 @@ -176,6 +176,7 @@
      SIDE_FORWARD,  // 뒤로 곡선을 그리기 전에 반지름만큼 더 올라가는 중 (side_arc: true, 이 노드가 운전)
      SIDE_TURN,   // 장애물 쪽으로 90도 도는 중 (제자리, 또는 side_arc 면 뒤로 가면서. 이 노드가 운전)
@@ -16,15 +16,6 @@
  
      // 9) 후진 뒤 곡선으로 돌아서 들어왔던 길로 나가기
      exit_enable_ = declare_parameter("exit_enable", true);
-@@ -1438,7 +1440,7 @@
-     side_rough_ = turned;
-     side_cam_turned_ = turned;
- 
--    // 목표: 격자를 봤으면 격자 기준 90도 (다시 똑바로), 한 번도 못 봤으면 side_turn_deg
-+    // 목표: yaml 의 side_turn_deg 만큼 (격자가 보이면 격자 기준, 안 보이면 대충 센 각도 기준)
-     const double target = side_turn_deg_ * deg;
-     const double remain = target - turned;
-     if (remain <= side_tolerance_deg_ * deg)
 @@ -1688,6 +1690,14 @@
      stop_wheels();
      if (exit_enable_)
