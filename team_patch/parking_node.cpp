@@ -176,6 +176,7 @@ class ParkingNode : public rclcpp::Node
     SIDE_FORWARD,  // 뒤로 곡선을 그리기 전에 반지름만큼 더 올라가는 중 (side_arc: true, 이 노드가 운전)
     SIDE_TURN,   // 장애물 쪽으로 90도 도는 중 (제자리, 또는 side_arc 면 뒤로 가면서. 이 노드가 운전)
     BACKUP,      // 90도 돈 뒤 backup_time 초 후진 (이 노드가 운전)
+    PARK_WAIT,   // 후진 뒤 park_wait_time 초 서 있기 (이 노드가 운전)
     EXIT_ARC,    // 두 바퀴 다 앞으로, 곡선으로 90도 돌아 길 쪽 보기 (이 노드가 운전)
     EXIT_STEM,   // 들어왔던 길을 반대로 내려가 도로로 나가기 (이 노드가 운전)
     DONE,        // 끝 (또는 그만둠)
@@ -362,6 +363,7 @@ private:
     // 8) 90도 돈 뒤 후진
     backup_time_ = declare_parameter("backup_time", 3.0);
     backup_speed_ = declare_parameter("backup_speed", 0.06);
+    park_wait_time_ = declare_parameter("park_wait_time", 1.0);
 
     // 9) 후진 뒤 곡선으로 돌아서 들어왔던 길로 나가기
     exit_enable_ = declare_parameter("exit_enable", true);
@@ -1438,8 +1440,8 @@ private:
     side_rough_ = turned;
     side_cam_turned_ = turned;
 
-    // 목표: 격자를 봤으면 격자 기준 90도 (다시 똑바로), 한 번도 못 봤으면 side_turn_deg
-    const double target = (side_grid_seen_ ? 90.0 : side_turn_deg_) * deg;
+    // 목표: yaml 의 side_turn_deg 만큼 (격자가 보이면 격자 기준, 안 보이면 대충 센 각도 기준)
+    const double target = side_turn_deg_ * deg;
     const double remain = target - turned;
     if (remain <= side_tolerance_deg_ * deg)
     {
@@ -1688,6 +1690,14 @@ private:
     stop_wheels();
     if (exit_enable_)
     {
+      // 후진 뒤 park_wait_time 초 서 있다가 나간다 (0 이면 바로 나감)
+      if (park_wait_time_ > 0.0)
+      {
+        state_ = State::PARK_WAIT;
+        state_time_ = 0.0;
+        RCLCPP_INFO(get_logger(), "주차 완료 -> %.1f초 대기", park_wait_time_);
+        return;
+      }
       start_exit_arc();
       return;
     }
@@ -2070,6 +2080,15 @@ private:
       step_backup();             // 시간으로 후진 (영상 안 봄)
       return;
     }
+    if (state_ == State::PARK_WAIT)
+    {
+      stop_wheels();             // 서 있기
+      if (state_time_ >= park_wait_time_)
+      {
+        start_exit_arc();        // 다 기다렸으면 나가기
+      }
+      return;
+    }
     if (state_ == State::EXIT_ARC)
     {
       step_exit_arc();           // 시간 초과 확인 (카메라로 못 재면 시간으로 돌기)
@@ -2096,7 +2115,7 @@ private:
     return state_ == State::APPROACH || state_ == State::EXTRA || state_ == State::TURN ||
            state_ == State::ENTRY_ARC ||
            state_ == State::STEM || state_ == State::SIDE_FORWARD || state_ == State::SIDE_TURN ||
-           state_ == State::BACKUP ||
+           state_ == State::BACKUP || state_ == State::PARK_WAIT ||
            state_ == State::EXIT_ARC || state_ == State::EXIT_STEM;
   }
 
@@ -2125,6 +2144,8 @@ private:
         return side_direction_ < 0.0 ? "side_turn_right" : "side_turn_left";
       case State::BACKUP:
         return "backup";
+      case State::PARK_WAIT:
+        return "park_wait";
       case State::EXIT_ARC:
         return "exit_arc";
       case State::EXIT_STEM:
@@ -2263,6 +2284,7 @@ private:
   double side_arc_backup_time_;
   double backup_time_;
   double backup_speed_;
+  double park_wait_time_;
   bool exit_enable_;
   double exit_arc_speed_;
   double exit_arc_radius_m_;
