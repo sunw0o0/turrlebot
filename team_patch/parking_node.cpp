@@ -314,6 +314,9 @@ private:
     entry_arc_min_radius_m_ = declare_parameter("entry_arc_min_radius_m", 0.05);
     entry_arc_speed_ = declare_parameter("entry_arc_speed", 0.08);
     entry_check_deg_ = declare_parameter("entry_check_deg", 45.0);
+    entry_pair_stop_ = declare_parameter("entry_pair_stop", true);
+    entry_pair_max_lean_deg_ = declare_parameter("entry_pair_max_lean_deg", 30.0);
+    entry_pair_check_deg_ = declare_parameter("entry_pair_check_deg", 20.0);
 
     // 6) 주차장 길 올라가기
     stem_use_white_ = declare_parameter("stem_use_white", true);
@@ -848,6 +851,22 @@ private:
     if (!now_angles.empty())
     {
       entry_prev_angles_ = now_angles;
+    }
+
+    // 입구로 들어가는 중: 길의 노란선 두 개가 짝으로 보이면 (덜 돌았어도) 바로 멈추고 두 선 가운데로 올라간다
+    //   (entry_pair_stop. 선이 entry_pair_max_lean_deg 보다 많이 기울어 있으면 아직 너무 비스듬해서 더 돈다)
+    const double cam_deg = std::abs(entry_cam_sum_) * 180.0 / M_PI;
+    if (!leaving_ && entry_pair_stop_ && (entry_cam_failed_ || cam_deg >= entry_pair_check_deg_))
+    {
+      const std::optional<double> pair_lean = yellow_pair_lean(yellow, static_cast<int>(turn_fit_rows_));
+      if (pair_lean && std::abs(*pair_lean) <= entry_pair_max_lean_deg_ * M_PI / 180.0)
+      {
+        RCLCPP_INFO(get_logger(), "곡선 중 길의 노란선 두 개가 보임 (기울기 %.1f도, 카메라 각도 %.1f도) -> 바로 올라감",
+          *pair_lean * 180.0 / M_PI, cam_deg);
+        stop_wheels();
+        start_stem(*pair_lean);
+        return;
+      }
     }
 
     const bool turned_enough = entry_cam_failed_ ?
@@ -1830,6 +1849,28 @@ private:
     drive(exit_arc_speed_, exit_w_);
   }
 
+  // 길의 노란선 두 개가 짝으로 보이면 그 평균 기울기 [rad] (+ 왼쪽으로 기움), 아니면 비어 있음
+  //   왼쪽 칸 / 오른쪽 칸에 곧은 노란선이 하나씩 (exit_line_max_rms_px 이내), 간격이 길 폭 정도 (pair_gap_min/max_px),
+  //   서로 나란함 (parallel_deg 이내). 화면 맨 위부터 y_end 줄까지만 본다 (아래쪽은 입구의 둥근 모서리)
+  std::optional<double> yellow_pair_lean(const cv::Mat & yellow, int y_end)
+  {
+    const int mid = static_cast<int>(bev_center_x_ * yellow.cols);
+    const std::optional<Line> left = fit_line(yellow, 0, mid, y_end);
+    const std::optional<Line> right = fit_line(yellow, mid, yellow.cols, y_end);
+    if (!left || !right || left->rms > exit_line_max_rms_px_ || right->rms > exit_line_max_rms_px_)
+    {
+      return std::nullopt;
+    }
+    const double bottom_y = yellow.rows - 1;
+    const double gap = right->x_at(bottom_y) - left->x_at(bottom_y);
+    if (gap < pair_gap_min_px_ || gap > pair_gap_max_px_ ||
+      std::abs(left->lean_left() - right->lean_left()) > parallel_deg_ * M_PI / 180.0)
+    {
+      return std::nullopt;
+    }
+    return (left->lean_left() + right->lean_left()) / 2.0;
+  }
+
   // 길의 노란선 기울기 [rad] (+ 왼쪽으로 기움). 화면 맨 위부터 y_end 줄까지만 본다. 안 보이면 비어 있음
   //   (EXIT_ARC: 들어왔던 길로 나갈 때, ENTRY_ARC: 곡선으로 들어갈 때)
   //   두 선이 길 폭만큼 떨어져 나란하면 둘의 평균, 아니면 보이는 한 선
@@ -2245,6 +2286,9 @@ private:
   double entry_arc_min_radius_m_;
   double entry_arc_speed_;
   double entry_check_deg_;
+  bool entry_pair_stop_;
+  double entry_pair_max_lean_deg_;
+  double entry_pair_check_deg_;
   bool stem_use_white_;
   double same_line_px_;
   int64_t stem_end_frames_;
