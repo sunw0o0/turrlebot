@@ -1415,7 +1415,7 @@ private:
   //   -> 영상마다 기울기를 재서 이어 붙인다: 44도 다음에 -43도가 나오면 격자 한 칸을 넘은 것 -> 47도.
   //      영상 사이에 45도 넘게 돌 일은 없어서 이렇게 이으면 오차가 쌓이지 않는다 (side_phi_ = 격자 기준 돈 각도)
   //   격자가 안 보이는 동안은 대충 더해 두고 (side_gap_est_):
-  //     직선이 보이면 바로 전 영상과 직선 방향 분포를 비교한 회전량, 직선도 없으면 odom (x side_odom_scale, 없으면 시간)
+  //     odom (x side_odom_scale) -> odom 이 없으면 바로 전 영상과 비교한 회전량 -> 그것도 없으면 시간
   //   다시 보이면 "대충 센 값에 가장 가까운 격자 각도" 로 바로잡는다 -> 안 보이는 구간에서 45도 넘게 틀리지 않으면 정확
   //   격자 기준 90도 (side_tolerance_deg 이내) 가 되면 멈춘다
   //   격자를 한 번도 못 보면: 대충 센 각도가 side_turn_deg 가 되면 멈춘다
@@ -1429,9 +1429,19 @@ private:
       tilt = grid_tilt(now_angles);
     }
 
-    // 격자가 안 보일 때 대충 더하기: 직선은 보이면 바로 전 영상과 비교한 회전량 (카메라), 직선도 없으면 odom / 시간
+    // 격자가 안 보일 때 대충 더하기 (side_gap_est_):
+    //   odom 이 있으면 odom (x side_odom_scale). 크기는 조금 틀려도 가만히 있는데 늘어나는 일은 없다
+    //   odom 이 없으면 바로 전 영상과 비교한 회전량 (도는 방향 부호를 지켜서. 흔들림이 +/- 로 상쇄되게),
+    //   직선도 없으면 "명령 회전 속도 x 시간"
     const std::optional<double> step = rotation_between(side_prev_angles_, now_angles);
-    side_gap_est_ += step ? std::abs(*step) : side_gap_other_;
+    if (side_use_odom_ || !step)
+    {
+      side_gap_est_ += side_gap_other_;
+    }
+    else
+    {
+      side_gap_est_ += side_direction_ * *step;   // 왼쪽으로 돌면 +, 오른쪽이면 - 로 나온다
+    }
     side_gap_other_ = 0.0;
     if (!now_angles.empty())
     {
