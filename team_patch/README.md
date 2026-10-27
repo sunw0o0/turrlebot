@@ -198,3 +198,8 @@ cd ~/Robit_intelligence_turtlebot_team
 git apply --check ~/turrlebot/team_patch/leave_turn.patch && git apply ~/turrlebot/team_patch/leave_turn.patch
 cd colcon_ws && colcon build --packages-select lane_follower
 ```
+
+### 장애물 쪽 회전: 격자 각도 이어 세기 (b0812e4 다음)
+카메라로 격자(직각 주차선) 기울기를 영상마다 재서 끊김 없이 이어 붙이고 격자 기준 90도에서 멈춤.
+선이 안 보이는 구간만 (직선 비교 / odom x side_odom_scale / 시간) 으로 대충 세고, 다시 보이면 격자로 바로잡음.
+젯슨 parking_node.cpp 가 제 버전 중 하나면 통째로 복사 (README 위의 버전 확인 명령 참고).
