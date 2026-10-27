@@ -86,6 +86,8 @@ parking:
     side_psd_threshold: 0.15        # [m] 왼쪽이 이 이하 -> 왼쪽으로, 오른쪽이 이 이하 -> 오른쪽으로
     side_hits_needed: 3             # 연속 이만큼 (PSD 20Hz -> 0.15초). 잡음 거르기
     side_turn_deg: 90.0             # 돌 각도 (90 = 가로 흰 선이 세로가 될 때까지)
+    side_turn_deg_left: -1.0        # 왼쪽으로 돌 때 각도 (0 보다 작으면 side_turn_deg). 예: 72.0
+    side_turn_deg_right: -1.0       # 오른쪽으로 돌 때 각도 (0 보다 작으면 side_turn_deg). 예: 80.0
     side_turn_toward: true          # true = PSD 가 가까운 쪽으로 돎, false = 반대쪽으로
     side_turn_when: white           # 언제 돌지
                                     #   white = PSD 로 본 쪽을 기억했다가, 앞의 가로 흰 선(주차장 끝)이 화면 아래에 오면

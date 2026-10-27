@@ -328,7 +328,10 @@ private:
     // 7) 옆 PSD 가 가까우면 반대쪽으로 90도
     side_psd_threshold_ = declare_parameter("side_psd_threshold", 0.15);
     side_hits_needed_ = declare_parameter("side_hits_needed", 3);
-    side_turn_deg_ = declare_parameter("side_turn_deg", 90.0);
+    side_turn_base_deg_ = declare_parameter("side_turn_deg", 90.0);
+    // 왼쪽 / 오른쪽으로 돌 때 각도를 따로 (0 보다 작으면 side_turn_deg 를 씀)
+    side_turn_deg_left_ = declare_parameter("side_turn_deg_left", -1.0);
+    side_turn_deg_right_ = declare_parameter("side_turn_deg_right", -1.0);
     side_turn_toward_ = declare_parameter("side_turn_toward", true);
     side_turn_when_ = declare_parameter("side_turn_when", std::string("white"));
     white_trigger_y_ = declare_parameter("white_trigger_y", 350);
@@ -1341,6 +1344,9 @@ private:
     state_ = State::SIDE_TURN;
     state_time_ = 0.0;
     side_direction_ = direction;
+    // 이번에 돌 각도: 오른쪽이면 side_turn_deg_right, 왼쪽이면 side_turn_deg_left (0 보다 작으면 side_turn_deg)
+    const double side_deg = direction < 0.0 ? side_turn_deg_right_ : side_turn_deg_left_;
+    side_turn_deg_ = side_deg >= 0.0 ? side_deg : side_turn_base_deg_;
     // 명령 반지름 = 반지름 x gain. 잘못 넣어도 위험하지 않게 5cm ~ 50cm 로 자른다
     side_arc_radius_cmd_ = std::clamp(side_arc_radius_m_ * side_arc_radius_gain_, 0.05, 0.50);
     if (side_arc_ && side_arc_radius_cmd_ != side_arc_radius_m_ * side_arc_radius_gain_)
@@ -2306,7 +2312,10 @@ private:
   double stem_timeout_;
   double side_psd_threshold_;
   int64_t side_hits_needed_;
-  double side_turn_deg_;
+  double side_turn_deg_ = 90.0;    // 이번에 돌 각도 [도] (돌기 시작할 때 왼쪽 / 오른쪽 값으로 정함)
+  double side_turn_base_deg_;
+  double side_turn_deg_left_;
+  double side_turn_deg_right_;
   bool side_turn_toward_;
   std::string side_turn_when_;
   bool side_cam_;
