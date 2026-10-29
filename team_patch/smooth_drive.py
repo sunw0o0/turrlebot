@@ -45,7 +45,10 @@ R = [
      '    run_speed_ = speed_;\n'
      '    v_out_ = fresh ? std::clamp(seen_drive_v_, 0.0, 0.5) : 0.0;   // 일반 주행이 가던 속도에서 이어서\n'
      '    w_out_ = 0.0;\n'
-     '    k_out_ = 0.0;\n'),
+     '    k_out_ = 0.0;\n'
+     '    tgt_v_ = v_out_;           // 첫 영상이 오기 전에 "명령 끊김" 으로 멈추지 않게 (그동안 지금 속도로 직진)\n'
+     '    tgt_w_ = 0.0;\n'
+     '    tgt_t_ = now().seconds();\n'),
     # 입구 곡선: 서서히 꺾는 만큼 일찍
     ('    const double extra_m = std::max(0.0, entry_gap_to_center_m_ - entry_arc_radius_m_ + entry_forward_m_ - latency_m);\n',
      '    const double extra_m = std::max(0.0, entry_gap_to_center_m_ - entry_arc_radius_m_ + entry_forward_m_ - latency_m -\n'
